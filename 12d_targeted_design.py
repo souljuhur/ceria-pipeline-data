@@ -1,25 +1,25 @@
 """
-12d_targeted_design.py — 목표 입자크기별 합성 조건 역설계 (75% 예측 구간)
+12d_targeted_design.py — 목표 입자크기별 합성 조건 역설계 (95% 예측 구간)
 
 목적:
-  TEM/SEM 1차 입자 크기 (예: 30 / 40 / 50 nm)를 얻기 위한
+  TEM/SEM 1차 입자 크기 (예: 10 / 30 / 60 nm)를 얻기 위한
   최적 습식합성 조건을 LightGBM 분위 회귀로 도출.
 
 방법:
-  Q12.5 + Q50 + Q87.5 세 모델 동시 학습 (log-space)
-  → 75% 예측 구간 [Q12.5, Q87.5] 를 갖는 후보 조건 탐색
+  Q2.5 + Q50 + Q97.5 세 모델 동시 학습 (log-space)
+  → 95% 예측 구간 [Q2.5, Q97.5] 를 갖는 후보 조건 탐색
 
 출력:
-  output/model/targeted_design_30nm.csv  (목표 크기별)
-  output/model/targeted_design_40nm.csv
-  output/model/targeted_design_50nm.csv
+  output/model/targeted_design_10nm.csv  (목표 크기별)
+  output/model/targeted_design_30nm.csv
+  output/model/targeted_design_60nm.csv
   output/model/targeted_design_summary.xlsx   (3시트 통합)
   output/model/targeted_design_ci_plot.png    (신뢰구간 시각화)
 
 실행:
   python 12d_targeted_design.py
-  python 12d_targeted_design.py --targets 10 20 30 40 50
-  python 12d_targeted_design.py --targets 30 40 50 --top 8
+  python 12d_targeted_design.py --targets 10 30 60
+  python 12d_targeted_design.py --targets 10 30 60 --top 8
 """
 import os, sys, warnings, argparse
 import numpy as np
@@ -164,7 +164,7 @@ def train_quantile_models(df: pd.DataFrame) -> tuple:
     )
 
     models = {}
-    for q in [0.125, 0.50, 0.875]:
+    for q in [0.025, 0.50, 0.975]:
         m = lgb.LGBMRegressor(objective="quantile", alpha=q, **lgbm_params)
         m.fit(X, y_log, categorical_feature=CATEGORICAL_FEATURES)
         models[q] = m
@@ -271,34 +271,34 @@ def inverse_design(models, encoders, df_train: pd.DataFrame,
     cand_enc = safe_encode(cand, encoders)
     X_cand = cand_enc[FEATURES]
 
-    print("분위 예측 중 (Q12.5 / Q50 / Q87.5)...")
-    q125_log = models[0.125].predict(X_cand)
+    print("분위 예측 중 (Q2.5 / Q50 / Q97.5)...")
+    q025_log = models[0.025].predict(X_cand)
     q50_log  = models[0.500].predict(X_cand)
-    q875_log = models[0.875].predict(X_cand)
+    q975_log = models[0.975].predict(X_cand)
 
     # quantile crossing 방지: 세 분위값을 오름차순 정렬
-    _stacked  = np.sort(np.stack([q125_log, q50_log, q875_log], axis=1), axis=1)
-    q125_log, q50_log, q875_log = _stacked[:, 0], _stacked[:, 1], _stacked[:, 2]
+    _stacked  = np.sort(np.stack([q025_log, q50_log, q975_log], axis=1), axis=1)
+    q025_log, q50_log, q975_log = _stacked[:, 0], _stacked[:, 1], _stacked[:, 2]
 
     # log → nm
-    cand["q50_nm"]     = np.exp(q50_log)
-    cand["q125_nm"]    = np.exp(q125_log)   # 75% CI 하한 (nm)
-    cand["q875_nm"]    = np.exp(q875_log)   # 75% CI 상한 (nm)
-    cand["ci_width_nm"] = cand["q875_nm"] - cand["q125_nm"]
+    cand["q50_nm"]      = np.exp(q50_log)
+    cand["q025_nm"]     = np.exp(q025_log)   # 95% CI 하한 (nm)
+    cand["q975_nm"]     = np.exp(q975_log)   # 95% CI 상한 (nm)
+    cand["ci_width_nm"] = cand["q975_nm"] - cand["q025_nm"]
 
-    # Gaussian 가정 표준편차 추정 (75% CI = ±1.15σ)
-    sigma_log = np.maximum((q875_log - q125_log) / (2 * 1.15), 0.01)
+    # Gaussian 가정 표준편차 추정 (95% CI = ±1.96σ)
+    sigma_log = np.maximum((q975_log - q025_log) / (2 * 1.96), 0.01)
 
     all_results = {}
 
     for target_nm in target_nm_list:
         target_log = np.log(target_nm)
-        tol_frac   = 0.25  # ±25 % 허용 (75% CI의 실용적 해석)
+        tol_frac   = 0.25  # ±25% 허용
         tol_log    = np.log(1 + tol_frac)
 
         # ── 스코어 계산 ────────────────────────────────────────────────────────
-        # ① 75% 구간이 목표를 포함하는지
-        in_ci = (q125_log <= target_log) & (target_log <= q875_log)
+        # ① 95% 구간이 목표를 포함하는지
+        in_ci = (q025_log <= target_log) & (target_log <= q975_log)
 
         # ② P(|log_size - log_target| ≤ tol_log) : Gaussian 근사 확률
         prob = (
@@ -310,7 +310,7 @@ def inverse_design(models, encoders, df_train: pd.DataFrame,
         score = (
             in_ci.astype(float) * 2.0
             + prob
-            - 0.25 * (q875_log - q125_log)   # 구간 넓을수록 불이익
+            - 0.25 * (q975_log - q025_log)   # 구간 넓을수록 불이익
         )
 
         cand_t = cand.copy()
@@ -335,18 +335,18 @@ def inverse_design(models, encoders, df_train: pd.DataFrame,
 
         # ── 열 정리 + 반올림 ─────────────────────────────────────────────────
         keep_cols = (
-            ["_target", "_score", "_in_ci", "_prob", "q50_nm", "q125_nm", "q875_nm", "ci_width_nm"]
+            ["_target", "_score", "_in_ci", "_prob", "q50_nm", "q025_nm", "q975_nm", "ci_width_nm"]
             + DESIGN_COLS
         )
         result_df = result_df[[c for c in keep_cols if c in result_df.columns]]
         result_df = result_df.rename(columns={
             "_target":  "목표크기_nm",
             "_score":   "score",
-            "_in_ci":   "75%CI내포함",
+            "_in_ci":   "95%CI내포함",
             "_prob":    f"P(±{int(tol_frac*100)}%)",
             "q50_nm":   "예측중앙값_nm",
-            "q125_nm":  "CI하한_nm",
-            "q875_nm":  "CI상한_nm",
+            "q025_nm":  "CI하한_nm",
+            "q975_nm":  "CI상한_nm",
             "ci_width_nm": "CI폭_nm",
         })
         num_cols = result_df.select_dtypes("number").columns
@@ -361,7 +361,7 @@ def inverse_design(models, encoders, df_train: pd.DataFrame,
 # ── 콘솔 출력 ─────────────────────────────────────────────────────────────────
 def _print_result(df: pd.DataFrame, target_nm: float):
     print(f"\n{'='*70}")
-    print(f"  목표: {target_nm} nm  (75% 예측 구간 기준 상위 {len(df)}개 조건)")
+    print(f"  목표: {target_nm} nm  (95% 예측 구간 기준 상위 {len(df)}개 조건)")
     print(f"{'='*70}")
 
     display_cols = [
@@ -415,7 +415,7 @@ def plot_ci(all_results: dict):
             xerr=[lo.values, hi.values],
             fmt="o", color=color, markersize=9,
             capsize=6, linewidth=2,
-            label="75% 예측 구간",
+            label="95% 예측 구간",
         )
         ax.axvline(target_nm, color="red", linestyle="--", linewidth=2,
                    label=f"목표: {target_nm} nm")
@@ -434,7 +434,7 @@ def plot_ci(all_results: dict):
         ax.set_yticklabels(labels, fontsize=7.5)
         ax.invert_yaxis()
         ax.set_xlabel("1차 입자 크기 (nm)", fontsize=12)
-        ax.set_title(f"목표 {target_nm} nm\n(75% 예측 구간)", fontsize=13)
+        ax.set_title(f"목표 {target_nm} nm\n(95% 예측 구간)", fontsize=13)
         ax.legend(fontsize=9)
         ax.grid(axis="x", linestyle=":", alpha=0.5)
 
@@ -470,8 +470,8 @@ def main():
         description="목표 입자크기별 75% 예측구간 합성 조건 역설계"
     )
     parser.add_argument(
-        "--targets", nargs="+", type=float, default=[30.0, 40.0, 50.0],
-        help="목표 입자 크기 (nm). 예: --targets 10 20 30 40 50",
+        "--targets", nargs="+", type=float, default=[10.0, 30.0, 60.0],
+        help="목표 입자 크기 (nm). 예: --targets 10 30 60",
     )
     parser.add_argument(
         "--candidates", type=int, default=100_000,
@@ -484,7 +484,7 @@ def main():
     args = parser.parse_args()
 
     print("=" * 70)
-    print("  목표 입자크기별 합성 조건 역설계 (LightGBM 75% 예측 구간)")
+    print("  목표 입자크기별 합성 조건 역설계 (LightGBM 95% 예측 구간)")
     print(f"  목표 크기: {args.targets} nm")
     print(f"  탐색 후보: {args.candidates:,}개  |  출력 상위: {args.top}개")
     print("=" * 70)
@@ -496,7 +496,7 @@ def main():
     n_primary = df[PRIMARY_TARGET].notna().sum()
     print(f"  습식 합성 데이터: {len(df):,}행  |  1차 입자 보유: {n_primary:,}행")
 
-    print("\n[2] 분위 회귀 모델 학습 (Q12.5 / Q50 / Q87.5)")
+    print("\n[2] 분위 회귀 모델 학습 (Q2.5 / Q50 / Q97.5)")
     models, encoders, df_train = train_quantile_models(df)
 
     print(f"\n[3] 역설계 탐색 (후보 {args.candidates:,}개)")

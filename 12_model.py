@@ -240,9 +240,16 @@ def preprocess(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = np.nan
 
     # ── 이상값 제거 (1차 입자 0.3~500 nm) ───────────────────────────────────────
-    for col in [TARGET_SIZE, TARGET_XRD, "particle_size_sem_nm"]:
+    for col in [TARGET_SIZE, "particle_size_sem_nm"]:
         if col in df.columns:
             df.loc[~df[col].between(0.3, 500), col] = np.nan
+    # XRD Scherrer: 2~150 nm (< 2nm 물리적 불가, > 150nm Scherrer 한계 초과)
+    if TARGET_XRD in df.columns:
+        n_before = df[TARGET_XRD].notna().sum()
+        df.loc[~df[TARGET_XRD].between(2, 150), TARGET_XRD] = np.nan
+        n_removed = n_before - df[TARGET_XRD].notna().sum()
+        if n_removed:
+            print(f"  [품질] XRD Scherrer 범위(2~150nm) 이탈 제거: {n_removed}건")
 
     # ── 교차 필드 물리 검증 ───────────────────────────────────────────────────
     # XRD 결정자 크기는 일반적으로 TEM 입자 크기보다 작거나 같음
@@ -449,32 +456,6 @@ def build_pipeline(kind: str, early_stopping: bool = None) -> Pipeline:
     return Pipeline([("pre", pre), ("model", model)])
 
 
-def build_quantile_pipeline(quantile: float, early_stopping: bool = True) -> Pipeline:
-    """입자크기 분위수 회귀 파이프라인 (Q10/Q90 구간 폭 = 불확실성 proxy)."""
-    if _HAS_TARGET_ENC:
-        cat_transformer = TargetEncoder(
-            target_type="continuous", smooth="auto",
-            cv=5, shuffle=True, random_state=42,
-        )
-    else:
-        cat_transformer = Pipeline([
-            ("imp", SimpleImputer(strategy="constant", fill_value="unknown")),
-            ("oh",  OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
-        ])
-    pre = ColumnTransformer([
-        ("num", "passthrough", NUMERIC_FEATURES),
-        ("cat", cat_transformer, CATEGORICAL_FEATURES),
-    ], remainder="drop")
-    model = HistGradientBoostingRegressor(
-        loss="quantile", quantile=quantile,
-        random_state=42, max_iter=500, learning_rate=0.05,
-        max_leaf_nodes=31, min_samples_leaf=20,
-        early_stopping=early_stopping,
-        validation_fraction=0.15 if early_stopping else None,
-        n_iter_no_change=25,
-    )
-    return Pipeline([("pre", pre), ("model", model)])
-
 
 # 로그 변환 대상 타깃 (입자크기는 log-normal 분포 → log 공간에서 학습)
 _LOG_TARGETS = {TARGET_COMPOSITE, TARGET_SIZE, TARGET_XRD}
@@ -589,91 +570,6 @@ def evaluate(df: pd.DataFrame, target: str, kind: str,
         print(f"    피처 중요도 계산 오류: {e}")
 
     return est
-
-
-def evaluate_per_method(df: pd.DataFrame, target: str, kind: str,
-                        min_samples: int = 80) -> dict:
-    """synthesis_method별 분리 모델: 방법별 패턴을 독립적으로 학습."""
-    sub = df.dropna(subset=[target]).copy()
-    if kind == "clf":
-        sub = sub[sub[target].apply(lambda v: isinstance(v, str) and v.strip() != "")]
-
-    use_log = (kind == "reg" and target in _LOG_TARGETS)
-    if use_log:
-        sub = sub.copy()
-        sub[target] = np.log(sub[target])
-
-    method_counts = sub["synthesis_method"].value_counts()
-    eligible = method_counts[method_counts >= min_samples].index.tolist()
-    # "other"는 이질적 — 제외
-    eligible = [m for m in eligible if m != "other"]
-
-    if not eligible:
-        print(f"  [{target}] 방법별 모델: n≥{min_samples} 충족 방법 없음")
-        return {}
-
-    print(f"\n[{target}] synthesis_method별 분리 모델  (n≥{min_samples}, {len(eligible)}개 방법)")
-    print(f"  {'방법':<25} {'n':>5}  {'log-R²' if use_log else 'R²':>7}  "
-          f"{'nm-R²' if use_log else '':>7}  {'MAE':>10}")
-    print(f"  {'─'*25}  {'─'*5}  {'─'*7}  {'─'*7}  {'─'*10}")
-
-    results = {}
-    for method in eligible:
-        sub_m = sub[sub["synthesis_method"] == method].copy()
-        groups_m = sub_m["doi"]
-        n_papers = groups_m.nunique()
-        if n_papers < 3:
-            continue
-        X = sub_m[FEATURES]
-        y = sub_m[target]
-        n_splits = min(5, n_papers)
-        cv = GroupKFold(n_splits=n_splits)
-        # 소그룹은 early_stopping=False (validation window 크기 초과 방지)
-        est = build_pipeline(kind, early_stopping=(len(sub_m) >= 200))
-        try:
-            try:
-                pred_y = cross_val_predict(est, X, y, groups=groups_m, cv=cv)
-            except (ValueError, TypeError):
-                # early_stopping window 오류 → early_stopping=False로 재시도
-                est = build_pipeline(kind, early_stopping=False)
-                pred_y = cross_val_predict(est, X, y, groups=groups_m, cv=cv)
-            if kind == "reg":
-                if use_log:
-                    r2_log = r2_score(y, pred_y)
-                    y_nm = np.exp(y.values)
-                    p_nm = np.exp(pred_y)
-                    mae_nm = mean_absolute_error(y_nm, p_nm)
-                    r2_nm  = r2_score(y_nm, p_nm)
-                    print(f"  {method:<25} {len(sub_m):>5}  {r2_log:>+7.3f}  "
-                          f"{r2_nm:>+7.3f}  {mae_nm:>8.1f}nm")
-                    results[method] = {"r2_log": r2_log, "r2_nm": r2_nm,
-                                       "mae_nm": mae_nm, "n": len(sub_m)}
-                else:
-                    r2 = r2_score(y, pred_y)
-                    mae = mean_absolute_error(y, pred_y)
-                    print(f"  {method:<25} {len(sub_m):>5}  {r2:>+7.3f}  {'':>7}  {mae:>8.4f}")
-                    results[method] = {"r2": r2, "mae": mae, "n": len(sub_m)}
-            else:
-                acc = (pred_y == y).mean()
-                f1  = f1_score(y, pred_y, average="macro", zero_division=0)
-                print(f"  {method:<25} {len(sub_m):>5}  {acc:>7.3f}  {f1:>7.3f}")
-                results[method] = {"acc": acc, "f1": f1, "n": len(sub_m)}
-
-            # 전체 데이터로 재학습 후 per-method 모델 저장
-            est.fit(X, y)
-            safe = re.sub(r"[^\w]", "_", method)
-            model_file = os.path.join(MODEL_DIR, f"model_{target}_{kind}_{safe}.pkl")
-            with open(model_file, "wb") as _f:
-                pickle.dump(est, _f)
-        except Exception as e:
-            print(f"  {method:<25} 오류: {e}")
-
-    # 가중 평균 R² (n 기준)
-    if results and kind == "reg" and use_log:
-        total_n = sum(v["n"] for v in results.values())
-        w_r2 = sum(v["r2_nm"] * v["n"] for v in results.values()) / total_n
-        print(f"\n  가중 평균 nm-R² (방법별 합산): {w_r2:+.3f}")
-    return results
 
 
 def _save_performance_history(df: pd.DataFrame) -> None:
@@ -881,61 +777,6 @@ def suggest_experiments(clf: Pipeline, df: pd.DataFrame, top_k: int = 5) -> pd.D
                   "capping_agent", "ph_synthesis"]])
 
 
-def suggest_experiments_size(reg_q10: Pipeline, reg_q90: Pipeline,
-                              df: pd.DataFrame, top_k: int = 5) -> pd.DataFrame:
-    """
-    분위수 회귀(Q10/Q90) 예측 구간 폭이 가장 넓은 조건 제안.
-    입자크기 불확실성(nm)이 가장 큰 조건 = 실험하면 회귀 모델 개선 효과 최대.
-    """
-    rng = np.random.default_rng(2)
-    n_cand = 3000
-    cand = pd.DataFrame(index=range(n_cand))
-
-    for col in NUMERIC_FEATURES:
-        vals = df[col].dropna()
-        cand[col] = (rng.uniform(vals.quantile(0.05), vals.quantile(0.95), n_cand)
-                     if len(vals) > 0 else np.nan)
-    for col in CATEGORICAL_FEATURES:
-        vals = df[col].dropna()
-        vals = vals[vals != "unknown"]
-        cand[col] = (rng.choice(vals.unique(), n_cand) if len(vals) > 0 else "unknown")
-
-    def _is_empty_val(x):
-        return pd.isna(x) or str(x).lower() in ("none", "unknown", "")
-
-    cand["capping_present"] = cand["capping_agent"].apply(
-        lambda x: 0.0 if _is_empty_val(x) else 1.0)
-    cand["has_mineralizer"] = cand["mineralizer"].apply(
-        lambda x: 0.0 if _is_empty_val(x) else 1.0)
-    cand["has_dopant"] = cand["dopant"].apply(
-        lambda x: 0.0 if _is_empty_val(x) else 1.0)
-
-    for src, dst in [("synthesis_temperature_c", "log_synth_temp"),
-                      ("synthesis_time_h",         "log_synth_time"),
-                      ("calcination_temperature_c","log_calc_temp")]:
-        cand[dst] = np.log(cand[src].clip(lower=1))
-
-    cand["thermal_budget"]      = cand["synthesis_temperature_c"] * cand["synthesis_time_h"]
-    cand["calc_thermal_budget"] = cand["calcination_temperature_c"] * cand["calcination_time_h"]
-    cand["bet_surface_area_m2g"] = np.nan
-
-    X = cand[FEATURES]
-    # Q10/Q90는 log 공간에서 학습 → exp 변환으로 nm 단위 복원
-    q10_nm = np.exp(reg_q10.predict(X))
-    q90_nm = np.exp(reg_q90.predict(X))
-    cand["uncertainty_interval_nm"] = np.clip(q90_nm - q10_nm, 0, None)
-    cand["predicted_q10_nm"] = q10_nm
-    cand["predicted_q90_nm"] = q90_nm
-
-    show_cols = ["uncertainty_interval_nm", "predicted_q10_nm", "predicted_q90_nm",
-                 "synthesis_method", "mineralizer",
-                 "synthesis_temperature_c", "synthesis_time_h",
-                 "capping_agent", "ph_synthesis"]
-    return (cand.sort_values("uncertainty_interval_nm", ascending=False)
-                .head(top_k)
-                .reset_index(drop=True)[show_cols])
-
-
 # ── 대시보드용 실시간 예측 API ────────────────────────────────────────────────
 def predict_synthesis_conditions(
     df: pd.DataFrame,
@@ -1080,12 +921,12 @@ def main():
 
     # 분류 — 형태
     print("\n[분류] 입자 형태 예측")
-    clf_morph = evaluate(df, TARGET_MORPH, "clf")
+    try:
+        clf_morph = evaluate(df, TARGET_MORPH, "clf")
+    except MemoryError as _me:
+        print(f"  [SKIP] 형태 분류 OOM 오류 — 회귀 결과는 저장됨: {_me}")
+        clf_morph = None
 
-    print("\n" + "─" * 40)
-    print("synthesis_method별 분리 모델")
-    print("─" * 40)
-    evaluate_per_method(df, TARGET_COMPOSITE, "reg", min_samples=80)
 
     print("\n" + "─" * 40)
     print("역설계 (목표 조건 탐색)")
@@ -1122,28 +963,10 @@ def main():
         print(f"역설계 결과 저장: {out_path2}")
 
     print("\n" + "─" * 40)
-    print("능동학습 — 다음 실험 제안")
+    print("능동학습 — 다음 실험 제안 (형태 불확실성)")
     print("─" * 40)
 
-    # ① 입자크기 능동학습 — Q10/Q90 분위수 회귀 구간폭
-    sub_al = df[df[TARGET_COMPOSITE].notna() & df["doi"].notna()].copy()
-    if len(sub_al) >= 50:
-        print("\n[능동학습] 입자크기 Q10/Q90 분위수 모델 학습 중...")
-        y_al = np.log(sub_al[TARGET_COMPOSITE].clip(lower=1))
-        X_al = sub_al[FEATURES]
-        use_es = len(sub_al) >= 200
-        reg_q10 = build_quantile_pipeline(0.10, early_stopping=use_es)
-        reg_q90 = build_quantile_pipeline(0.90, early_stopping=use_es)
-        reg_q10.fit(X_al, y_al)
-        reg_q90.fit(X_al, y_al)
-        sug_size = suggest_experiments_size(reg_q10, reg_q90, df, top_k=5)
-        print("\n입자크기 불확실성 최대 조건 (회귀 모델 개선 효과 최대):")
-        print(sug_size.to_string())
-        size_path = os.path.join(MODEL_DIR, "active_learning_size_histgbm.csv")
-        sug_size.to_csv(size_path, index=False)
-        print(f"저장: {size_path}")
-
-    # ② 형태 능동학습 — 분류 엔트로피
+    # 형태 능동학습 — 분류 엔트로피
     if clf_morph is not None:
         suggestions = suggest_experiments(clf_morph, df, top_k=5)
         print("\n형태 불확실성 최대 조건 (분류 모델 개선 효과 최대):")

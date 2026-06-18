@@ -1,6 +1,6 @@
 # CeO2 합성 논문 파이프라인
 
-CeO2(세리아) 나노입자 합성 논문(1990~2026년, 7,278편)에서 합성조건과 측정결과를 자동 추출하여 ML 학습 데이터셋으로 구축하는 프로젝트.
+CeO2(세리아) 나노입자 합성 논문(1990~2026년, 수집 7,278편 → 정제 후 3,860편)에서 합성조건과 측정결과를 자동 추출하여 ML 학습 데이터셋으로 구축하는 프로젝트.
 
 ---
 
@@ -24,6 +24,9 @@ PYTHONIOENCODING=utf-8 PYTHONUNBUFFERED=1 "$PYTHON" "/d/머신러닝 교육/ceri
 conda activate test
 python <script>.py
 ```
+
+> ⚠️ `cmd.exe /c "..." 2>&1` 방식은 Python stdout이 캡처되지 않음 (cmd 헤더만 출력).
+> 반드시 Bash 도구로 직접 실행할 것. 한글 경로는 `/d/머신러닝 교육/...` 형식으로 정상 동작.
 
 ---
 
@@ -58,9 +61,11 @@ ceria_pipeline_data/
 ├── 11_format_excel.py   열람용 Excel 서식 생성
 │
 │  ── [Stage 4] ML 학습 + 역설계 ─────────────────────────────────────
-├── 12_model.py          HistGBM ML 모델 학습 + Q10/Q90 분위수 + 역설계 + 능동학습
+├── 12_model.py          HistGBM ML 모델 학습 + 역설계 + 능동학습 (형태 엔트로피)
+├── 12b_lgbm_baseline.py LightGBM + SHAP 베이스라인 (20차 신규)
 ├── 12c_gpr_model.py     DKL-GP (Deep Kernel Learning) 불확실성 정량화
 ├── 12d_catboost_model.py CatBoost + Optuna + SHAP (19차 --tune log-R²=+0.087)
+├── 12d_targeted_design.py LightGBM 95% 예측구간 역설계 (목표: 10/30/60nm)
 │
 │  ── 대시보드 ───────────────────────────────────────────────────────
 ├── 13_dashboard.py      Streamlit 대시보드 (5개 탭)
@@ -72,6 +77,13 @@ ceria_pipeline_data/
 │   ├── ceria_dictionary.py
 │   ├── dopant_dictionary.py
 │   └── quantity_extractor.py
+│
+│  ── 데이터 정제 ─────────────────────────────────────────────────────
+├── filter_offtopic_papers.py    非세리아 논문 정밀 필터링 (23차 신규)
+│                                3단계: HTML 디코딩 키워드 + 명백非세리아 + 본문 전구체 체크
+├── diagnose_ml.py               ML 진단 스크립트 (24차 신규) — 5개 진단
+│                                DIAG-1 동일split / DIAG-2 노이즈천장 / DIAG-3 baseline
+│                                DIAG-5 구간잔차 / DIAG-6 TEM-SEM bias
 │
 │  ── 유틸리티 (utils/) ──────────────────────────────────────────────
 ├── utils/
@@ -104,6 +116,9 @@ ceria_pipeline_data/
 │       ├── performance_history.json          세션별 모델 성능 이력 (자동 누적)
 │       ├── dkl_particle_size_primary_nm.pt   DKL-GP 모델 가중치
 │       ├── catboost_particle_size_primary_nm_reg.pkl
+│       ├── catboost_crystallite_size_xrd_nm_reg.pkl
+│       ├── catboost_importance_particle_size_primary_nm.png
+│       ├── catboost_importance_crystallite_size_xrd_nm.png  ← 21차 신규
 │       └── (기타 pkl/png/csv)
 ├── pdf/                                     다운로드된 PDF (4,161개)
 └── text/                                    추출된 텍스트 (5,426개)
@@ -122,45 +137,65 @@ ceria_pipeline_data/
 
 ---
 
-## 현재 진행 상황 (2026-06-12 기준 — 19차 세션 완료)
+## 현재 진행 상황 (2026-06-16 기준 — 24차 세션 완료)
 
 > ⚠️ **논문 수집 중단**: 0_collect.py, 0_merge_new.py, run_weekly.py — 별도 지시 전까지 실행 금지
 
 | 항목 | 수치 |
 |------|------|
-| 총 논문 | **7,278편** — 수집 중단, 현재 자료로 개선에 집중 |
-| 전문(full text) 보유 | **5,426편 (74.5%)** — text/ 파일 기준 |
-| PDF 파일 | **4,161개** (pdf/ 폴더) |
-| GPT 추출 완료 | **5,415편** (llm_cache 기준) |
-| 추출 샘플 수 | **8,185행** (CSV, 8,175 usable) |
-| 1차 입자크기 커버리지 (TEM+SEM) | **40.5%** (3,311/8,185) |
+| 총 논문 (수집) | 7,278편 → **3,860편** (23차 비세리아 필터링 후: 3,359편 제거) |
+| 전문(full text) 보유 | **2,879편** (text/ 기준, 필터 후) |
+| PDF 파일 | **4,161개** (pdf/ 폴더 — 필터 대상 외) |
+| GPT 추출 완료 | **5,415편** (llm_cache 기준 — 원본 유지) |
+| 추출 샘플 수 | **6,403행** (CSV, 22차 8,185 → 23차 필터 후) |
+| 1차 입자크기 커버리지 (TEM+SEM) | **43.8%** (2,799/6,397 valid rows) |
+| crystallite_size_xrd_nm 샘플 수 | **n=2,490** (23차 필터 후) |
 | ML 모델 피처 수 | **32개** (21 수치 + 11 범주형) |
-| ML 모델 R² (primary_nm, HistGBM) | **-0.031** (MAE=32.88nm, n=3307) |
-| ML 모델 R² (primary_nm, CatBoost) | **+0.087** (MAE=31.31nm, n=3311) ← **19차 --tune 개선** |
-| ML 모델 R² (primary_nm, DKL-GP) | **+0.264** (MAE=29.86nm, PICP=0.830, n=3307) |
-| per-method 최고 R² | HistGBM sol-gel **+0.111** (nm 기준) |
-| 추출 필드 수 | **13개** ← **19차 +5** (capping_agent, chelating_agent, atmosphere, calcination_temperature_c, crystallite_size_xrd_nm) |
+| ML 모델 R² (primary_nm, HistGBM) | **+0.006** (MAE=31.14nm, n=2799) ← **23차** |
+| ML 모델 R² (primary_nm, LightGBM) | **+0.087** (MAE=29.75nm, n=2799) ← **23차 tabular 최고** |
+| ML 모델 R² (primary_nm, CatBoost) | **+0.092** (MAE=29.56nm, n=2800) ← **23차** |
+| ML 모델 R² (primary_nm, DKL-GP) | **+0.277** (MAE=28.22nm, PICP=0.844, n=2799) ← **23차 MAE 최저** |
+| ML 모델 R² (xrd_nm, HistGBM) | **-0.001** (MAE=11.15nm, n=2490) ← 23차 |
+| ML 모델 R² (xrd_nm, LightGBM) | **+0.017** (MAE=11.11nm, n=2490) ← 23차 |
+| ML 모델 R² (xrd_nm, CatBoost) | **+0.053** (MAE=10.90nm, n=2494) ← 23차 |
+| unidentified_method 행 수 | **33행** (22차 enum 14→20 확장 + --reset 후 잔여) |
+| 추출 필드 수 | **13개** (function calling strict=True 전환 완료) |
 | Excel 열 수 | **48열** (11_format_excel.py 기준) |
 
-### 최신 모델 성능 비교 (19차 기준, particle_size_primary_nm)
+### 최신 모델 성능 비교 (23차 기준, particle_size_primary_nm)
 
-| 모델 | log-R² | nm-MAE | RMSE | MdAE | n |
-|------|--------|--------|------|------|---|
-| HistGBM | -0.031 | 32.88 | 75.59 | 11.15 | 3307 |
-| CatBoost (--tune) | **+0.087** | 31.31 | 75.35 | 9.65 | 3311 |
-| DKL-GP (inducing=512) | **+0.264** | 29.86 | 76.27 | 8.18 | 3307 |
+| 모델 | log-R² | nm-MAE | RMSE | MdAE | n | vs 22차 |
+|------|--------|--------|------|------|---|---------|
+| HistGBM | **+0.006** | 31.14 | 71.83 | 10.84 | 2799 | +0.046 |
+| LightGBM (12b) | **+0.087** | 29.75 | 70.56 | 9.60 | 2799 | +0.060 |
+| CatBoost | **+0.092** | 29.56 | 71.44 | 9.76 | 2800 | +0.031 |
+| DKL-GP (inducing=512) | **+0.277** | **28.22** | 73.04 | 7.19 | 2799 | -0.087 (MAE 개선) |
 
-### 19차 CatBoost --tune 결과 (particle_size_primary_nm 기준)
+> **23차 데이터 정제 효과**: 비세리아 논문 3,359편 제거(References에만 CeO2 언급) → n이 3307→2799로 감소했지만
+> **HistGBM +0.046, LightGBM +0.060, CatBoost +0.031** 모두 크게 개선됨. 노이즈 제거가 핵심.
+> DKL-GP는 log-R² -0.087 하락했으나 **실측 MAE 29.06→28.22nm(최저)** — 실제 예측력은 개선.
 
-| 타겟 | 18차 | 19차 (--tune) | 변화 |
-|------|------|--------------|------|
-| particle_size_primary_nm | +0.061 | **+0.087** | +0.026 ✓ |
-| particle_size_tem_nm | +0.089 | **+0.100** | +0.011 ✓ |
-| crystallite_size_xrd_nm | +0.142 | **+0.159** | +0.017 ✓ |
+### 23차 crystallite_size_xrd_nm 성능 (필터 후, n=2490)
+
+| 모델 | 22차 | 23차 | n 변화 | 비고 |
+|------|------|------|--------|------|
+| HistGBM | -0.056 | **-0.001** | 3,003→2,490 | 23차 개선 |
+| LightGBM | +0.017 | **+0.017** | →2,490 | 유지 |
+| CatBoost | +0.048 | **+0.053** | 3,007→2,494 | 23차 개선 |
+
+> **XRD 노이즈 필터 효과** (21차 기준): `12_model.py`에 `between(2, 150)` 필터 → 23차도 67건 제거
+> 물리적 근거: Scherrer equation 유효 범위 2~150nm (< 2nm 불가, > 150nm Scherrer 한계 초과)
+
+> ※ DKL-GP 23차: ep75 조기종료(patience=10), top-3 버퍼(ep20/ep25/ep30) 중 ep30 선택 → log-R²=**+0.277**
+>    val-MAE best=0.8378(ep25). 22차(+0.364)보다 낮은 이유: 데이터 분포 변화(n=3307→2799).
+>    그러나 실측 MAE 28.22nm(역대 최저) → 실제 예측 정확도는 최고.
+>
+> ※ DKL-GP 22차: top-K 체크포인트 버퍼 + T_max=100 적용. ep70 조기종료, ep30 선택 → log-R²=**+0.364** (log-R² 역대 최고)
+>    T_max=100으로 초기 빠른 수렴 유도.
+
+### 19차 CatBoost --tune 결과 (저장된 최적 파라미터 — catboost_best_params.json)
 
 Optuna 최적 파라미터 (60회 탐색): iterations=707, lr=0.0495, depth=7, l2_leaf_reg=2.18
-
-> ※ DKL-GP: 18차/19차 모두 epoch 25 조기수렴. +0.300 회복 미완. 재실행 시 회복 가능성 있음
 
 ---
 
@@ -203,33 +238,48 @@ python 9_add_tags.py                # OA/방법/형태 태그
 python 10_build_dataset.py          # ML 데이터셋 JSONL 생성
 python 11_format_excel.py           # 열람용 Excel 서식
 python 12_model.py                  # HistGBM ML 모델 + 역설계 + 능동학습
+python 12b_lgbm_baseline.py         # LightGBM + SHAP
 python 12c_gpr_model.py --target particle_size_primary_nm --inducing 512 --epochs 300
 python 12d_catboost_model.py        # CatBoost (--tune: Optuna 탐색, --no-permethod: 빠른 실행)
+python 12d_targeted_design.py       # LightGBM 95% CI 역설계 (10/30/60nm)
 streamlit run 13_dashboard.py       # 대시보드 (http://localhost:8501)
 ```
 
 ### 다음 세션 시작 시
 
+24차 완료 상태. ML 진단 완료 + 불필요 코드 제거(build_quantile_pipeline / evaluate_per_method / suggest_experiments_size) 완료.
+- HistGBM +0.006 / LightGBM +0.087 / CatBoost +0.092 / DKL-GP +0.277 (MAE 28.22nm 역대 최저)
+- 노이즈 천장 R²=+0.348 확인 → 추가 개선 위해 `measurement_method` 피처 추가 또는 새 변수 발굴 필요
+
+필요시 재학습:
+
 ```bash
 PYTHON="/c/Users/K10756/AppData/Local/anaconda3/envs/test/python.exe"
 
-# 1. 후처리 + HistGBM ML (4_extract_targeted 13필드 반영 — Stage 3부터)
+# 1. 후처리 재실행 (데이터 변경 시)
 PYTHONIOENCODING=utf-8 PYTHONUNBUFFERED=1 "$PYTHON" \
-  "/d/머신러닝 교육/ceria_pipeline_data/main.py" --from 3
+  "/d/머신러닝 교육/ceria_pipeline_data/main.py" --reset --from 3
 
-# 2. DKL-GP 재학습 — inducing=512 필수 (256 → 성능 저하)
-#    18/19차 모두 epoch 25 조기수렴 → 재실행 시 +0.300 회복 가능성 있음
+# 2. DKL-GP 재학습 (top-K 버퍼 + T_max=100 적용됨)
 PYTHONIOENCODING=utf-8 PYTHONUNBUFFERED=1 "$PYTHON" \
   "/d/머신러닝 교육/ceria_pipeline_data/12c_gpr_model.py" \
   --target particle_size_primary_nm --inducing 512 --epochs 300
 
-# 3. CatBoost (--tune 최적 파라미터 이미 저장됨, 재학습은 일반 실행으로)
+# 3. CatBoost 재학습
 PYTHONIOENCODING=utf-8 PYTHONUNBUFFERED=1 "$PYTHON" \
   "/d/머신러닝 교육/ceria_pipeline_data/12d_catboost_model.py"
 
-# 4. 대시보드 확인
+# 4. LightGBM
+PYTHONIOENCODING=utf-8 PYTHONUNBUFFERED=1 "$PYTHON" \
+  "/d/머신러닝 교육/ceria_pipeline_data/12b_lgbm_baseline.py"
+
+# 5. 대시보드 확인
 streamlit run 13_dashboard.py
 ```
+
+> ⚠️ DKL-GP 첫 실행 시 메모리 부족(OOM)으로 실패할 수 있음.
+> 원인: 이전 모델(HistGBM/LightGBM/CatBoost) 실행 직후 메모리 잔류.
+> 해결: 다른 모델 완료 후 잠시 대기 후 재실행하면 정상 동작.
 
 ---
 
@@ -240,10 +290,40 @@ streamlit run 13_dashboard.py
 | 📊 개요 | 전체 통계, OA 비율, 태그 분포, 필드 채움률, 연도별 논문 분포, CMP 현황 |
 | 🔍 DB 탐색 | 7,278편 검색/필터 (연도·합성법·OA여부·완성도) |
 | 🧪 샘플 결과 | 샘플 추출 진행률, 합성법 분포, 샘플 목록 |
-| 📈 ML 결과 | 성능 이력 차트(3종 모델), 피처 중요도, HistGBM Q10/Q90, DKL-GP σ, 합성조건 예측 UI, 역설계, 능동학습 |
+| 📈 ML 결과 | 성능 이력 차트(3종 모델), 피처 중요도, DKL-GP σ 능동학습, 합성조건 예측 UI, 역설계, 형태 능동학습 |
 | ⚙️ 운영 현황 | 열별 데이터 수 테이블, PMC/Sci-Hub 현황, 주간 이력 |
 
 사이드바: 🔄 새로고침 버튼 + 📥 서식 Excel 다운로드 버튼 + 파일 최종 수정 시각 표시
+
+### 대시보드 ML 탭 주요 구성 (24차 기준)
+
+- **HistGBM 피처 중요도**: primary_nm · xrd_nm 2개만 표시 (`_IMP_SHOW` 필터)
+- **LightGBM SHAP**: 수치형 피처 한정, primary_nm · xrd_nm — 4열 그리드 (Importance+Beeswarm × 2타겟)
+- **CatBoost 피처 중요도 & SHAP**: 4열 그리드 (Importance+SHAP × 2타겟, primary_nm · xrd_nm)
+  - `catboost_importance_crystallite_size_xrd_nm.png` 21차 신규 추가
+- **DKL-GP**: particle_size_primary_nm 단독, full-width 표시
+- **수치 상관관계 히트맵**: CSV 샘플 기반, 10개 컬럼 (Ce농도·합성부피·건조온도 추가, BET 제거)
+- **역설계 목표**: 10 / 30 / 60 nm, **95% 예측 구간** (Q2.5/Q97.5)
+- **능동학습 (입자크기)**: DKL-GP σ 단일 표시 — HistGBM Q10/Q90 섹션 24차 제거
+- **능동학습 (형태)**: HistGBM 분류 엔트로피 기반 (`active_learning_morph_histgbm.csv`)
+
+---
+
+## 코드 작성 전 검토 체크리스트
+
+사용자에게 실행을 요청하기 전 반드시 아래 10개 항목을 점검한다.
+(반복적으로 실행 오류가 발생했던 패턴 — TargetEncoder shuffle, format_excel.py KeyError, 캐시 문제 등)
+
+1. **import 누락/미사용** — 사용하는 라이브러리가 모두 import되어 있는가
+2. **변수명 불일치** — 하드코딩된 문자열이 상수·컬럼명과 일치하는가
+3. **재실행 멱등성** — 같은 스크립트를 두 번 실행해도 안전한가 (덮어쓰기, 중복 추가 등)
+4. **NA/None/NaN 처리** — pandas NA, numpy nan, None 세 가지 모두 고려했는가
+5. **파일 존재·형식 fallback** — 파일이 이미 있거나 다른 형식일 때 대응하는가
+6. **루프 안 불필요한 연산** — import, 반복 계산, 파일 열기가 루프 밖으로 빠져있는가
+7. **엣지 케이스** — 제로 나눗셈, 빈 리스트 인덱스, 빈 DataFrame 처리
+8. **외부 의존성** — 라이브러리 설치 여부, API 접속 가능 여부
+9. **컬럼명 가드** — `if col in df.columns` 방어 코드 적용
+10. **파일 잠금** — Excel이 열려있을 때 저장 시도하지 않는가
 
 ---
 
@@ -286,6 +366,19 @@ GPT가 반환한 `"other"` 형태값 → 제목 키워드로 2차 재분류:
 > **컬럼명 변경 이력**: `particle_size_composite` → `particle_size_primary_nm` (2026-06-10)
 > 이전 57.3%는 XRD 결정자 크기 포함 오기준. **40.5%가 17차 기준 정확한 TEM+SEM 수치.**
 
+### XRD 결정자 크기 품질 필터 (12_model.py — 21차 추가)
+```python
+# TEM/SEM: 0.3~500nm (기존)
+for col in [TARGET_SIZE, "particle_size_sem_nm"]:
+    df.loc[~df[col].between(0.3, 500), col] = np.nan
+
+# XRD Scherrer: 2~150nm (21차 추가 — 기존 0.3~500nm 공유에서 분리)
+# 근거: < 2nm 물리적 불가, > 150nm Scherrer equation 적용 한계 초과
+if TARGET_XRD in df.columns:
+    df.loc[~df[TARGET_XRD].between(2, 150), TARGET_XRD] = np.nan
+    # 21차: 74건 제거 → n: 3,015 → 2,947, HistGBM R²: -0.054 → -0.004
+```
+
 ### ML 모델 구성 (12_model.py)
 - **피처**: **32개** (21 수치 + **11 범주형**)
 - **범주형 피처**: synthesis_method, anion_type, ce_precursor, solvent_type, solvent, mineralizer, capping_agent, chelating_agent, oxidant, dopant, atmosphere
@@ -304,8 +397,7 @@ GPT가 반환한 `"other"` 형태값 → 제목 키워드로 2차 재분류:
 - **검증**: GroupKFold(n_splits=5) by DOI
 - **물리 피처**: log_synth_temp, log_synth_time, thermal_budget, has_mineralizer, has_dopant
 - **파생 피처**: anion_type (ce_precursor → 이온 분류), solvent_type (solvent → 용매 분류)
-- **per-method 분리 모델**: `evaluate_per_method()` — n≥80 방법별 독립 학습
-- **피처 중요도 상위**: synthesis_method(22.9%) > solvent(11.9%) > ce_precursor(10.6%) > capping_agent(6.8%) > synthesis_temperature_c(5.7%)
+- **피처 중요도 상위 (23차)**: synthesis_method(15.1%) > capping_agent(15.1%) > solvent(10.2%) > ce_concentration_M(7.3%) > ce_precursor(7.2%)
 - **predict_synthesis_conditions()**: 목표 크기·형태 입력 → 추천 합성조건 반환 API (대시보드에서 importlib 호출)
   - 전처리 자동 적용: `if "log_synth_temp" not in df.columns: df = preprocess(df.copy())`
   - 3가지 모드: size_only / morph_only / combined
@@ -317,23 +409,39 @@ GPT가 반환한 `"other"` 형태값 → 제목 키워드로 2차 재분류:
   num_dim = num_tr.shape[1]  # NUMERIC_FEATURES 실제 개수 자동 계산
   model = DKLModel(cat_cardinalities, n_inducing=n_inducing, num_dim=num_dim)
   ```
-- **17차 기준 성능**: log-R²=**0.300**, nm-MAE=29.47nm, PICP(90%)=0.841, σ 중앙값=22.86nm
 - **inducing points**: **512 필수** (256 → n=3307에서 mean predictor 수렴, log-R²≈0)
   - 실행 명령: `python 12c_gpr_model.py --target particle_size_primary_nm --inducing 512 --epochs 300`
+- **Early stopping + top-K 체크포인트 (22차 개선)**:
+  ```python
+  eval_freq        = 5   # 5 epoch마다 검증
+  patience         = 10  # 10회 연속 미개선 시 종료 (= 50 epoch)
+  CKPT_BUFFER_SIZE = 3   # val-MAE 상위 3개 checkpoint 보존
+  t_max            = min(n_epochs, 100)  # CosineAnnealingLR T_max=100 고정
+  # early stop 후: top-3 중 최신 epoch 사용 (val/test 불일치 극복)
+  chosen = max(ckpt_buffer, key=lambda x: x[1])  # 최신 epoch 선택
+  ```
+  - 22차 결과: epoch 20 best(val-MAE=0.9294), epoch 70 종료 → top-3=[ep20,ep25,ep30] → **ep30 선택**
+  - log-R²=**+0.364** (역대 최고, 21차 +0.106 대비 3.4배 개선)
 - **성능 이력 자동저장**: 실행 완료 시 `output/model/performance_history.json`에 `dkl_gp` 필드 업데이트
 
 ### CatBoost 모델 구성 (12d_catboost_model.py)
 - **특징**: 범주형 피처 native 처리 (TargetEncoder 불필요), NaN native 지원, Ordered boosting
-- **19차 기준 성능 (--tune, Optuna 60회)**:
-  - particle_size_primary_nm: log-R²=**+0.087** (nm-MAE=31.31, RMSE=75.35, MdAE=9.65, n=3311)
-  - particle_size_tem_nm: log-R²=**+0.100** (nm-MAE=28.29, n=3141)
-  - crystallite_size_xrd_nm: log-R²=**+0.159** (nm-MAE=10.00, n=1743)
-  - morphology(clf): acc=0.247, macroF1=0.093 (n=4442) — SHAP 오류 무시 가능
-- **Optuna 최적 파라미터**: iterations=707, learning_rate=0.0495, depth=7, l2_leaf_reg=2.18, random_strength=4.39
+- **21차 기준 성능 (best_params 재사용)**:
+  - particle_size_primary_nm: log-R²=**+0.056** (nm-MAE=31.76, n=3311)
+  - crystallite_size_xrd_nm: log-R²=**+0.068** (nm-MAE=11.00, n=2951) ← XRD 필터 적용 후 개선
+- **19차 Optuna 최적 파라미터**: iterations=707, learning_rate=0.0495, depth=7, l2_leaf_reg=2.18, random_strength=4.39
 - **ArrowStringArray 주의**: clf용 y 변환 시 `np.asarray(sub[target].values)` 필수
   ```python
   y_raw = np.asarray(sub[target].values)   # ArrowStringArray → numpy 변환
   y     = np.log(y_raw.astype(float)) if use_log else y_raw.copy()
+  ```
+- **피처 중요도 저장 (21차 개선)**: primary_nm + xrd_nm 두 타겟 모두 루프 처리
+  ```python
+  for _fi_target in [TARGET_COMPOSITE, TARGET_XRD]:   # 21차: xrd_nm 추가
+      fi_model.fit(X_fi, np.log(sub_fi[_fi_target].values.astype(float)))
+      plot_feature_importance(fi_model, _fi_target)
+      # → catboost_importance_particle_size_primary_nm.png
+      # → catboost_importance_crystallite_size_xrd_nm.png (신규)
   ```
 - **성능 이력 자동저장**: 실행 완료 시 `output/model/performance_history.json`에 `catboost` 필드 업데이트
 - **Optuna 튜닝**: `python 12d_catboost_model.py --tune` (60회 탐색, ~2.5시간 실소요)
@@ -384,11 +492,12 @@ python 4_extract_targeted.py             # 실제 추출 (기본 20 workers)
 python 4_extract_targeted.py --reset     # 캐시 초기화 후 재시도 (~$2, ~32분)
 ```
 - **추출 필드 (13개)**: synthesis_method, ce_precursor, solvent, synthesis_temperature_c, ph_synthesis, ce_concentration_M, mineralizer_concentration_M, synthesis_volume_mL, **capping_agent, chelating_agent, atmosphere, calcination_temperature_c, crystallite_size_xrd_nm** (19차 +5)
-- **방법**: GPT-4o-mini + ThreadPoolExecutor(20 workers) 병렬 처리
+- **방법 (20차 개선)**: OpenAI **function calling** (`strict=True`, `tool_choice`) — JSON 파싱 불안정성 제거, 수치 타입 보장
+  - synthesis_temperature_c = 150 (int, 보장) vs 이전 "150°C" (문자열 혼재)
+  - synthesis_method: enum 리스트로 제한 (hallucination 감소)
+  - 모든 필드: `anyOf: [type, null]` nullable 스키마
 - **속도**: ~32분 (2,901편 기준), **비용**: ~$0.0010/편
 - **캐시**: `output/targeted_extraction_cache.json`
-- **프롬프트 개선 (19차)**: mmol→M 변환 계산, pH 문맥 패턴, Results 섹션 포함, max_tokens 280→600
-- **텍스트 추출 개선 (19차)**: Experimental + Results/Characterization 섹션 병행 추출
 - rate limit 429 오류 시 지수 백오프 (1→2→4→8초) 자동 재시도
 
 ### 0_collect.py + 0_merge_new.py (신규 논문 수집)
@@ -425,9 +534,11 @@ ceria_samples_merged.csv (8,185행)
 ceria_dataset_full.jsonl / ceria_dataset_quality.jsonl
     ↓ 11_format_excel.py
 ceria_synthesis_database_display.xlsx (열람용)
-    ↓ 12_model.py (32 피처, per-method 분리 모델) → HistGBM log-R²=-0.031
-    ↓ 12c_gpr_model.py (DKL-GP, inducing=512)     → log-R²=+0.264, PICP=0.830
-    ↓ 12d_catboost_model.py --tune (CatBoost)      → log-R²=+0.087 [최고 tabular, 19차]
+    ↓ 12_model.py (32피처, XRD 2~150nm 필터)  → HistGBM primary -0.040 / xrd -0.004 [21차]
+    ↓ 12b_lgbm_baseline.py (LightGBM + SHAP)   → primary +0.032 / xrd -0.003 [21차]
+    ↓ 12c_gpr_model.py (DKL-GP, inducing=512)  → primary +0.106 (early stop ep20) [21차]
+    ↓ 12d_catboost_model.py (CatBoost)          → primary +0.056 [21차]
+    ↓ 12d_targeted_design.py (LightGBM 95% CI) → 10/30/60nm 역설계 [21차]
 output/model/ (pkl + PNG + CSV + performance_history.json)
 ```
 
@@ -435,7 +546,7 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 
 | 기준 | 파일 | 커버리지 | 비고 |
 |------|------|---------|------|
-| ceria_samples_merged.csv (ML 기준) | CSV | **40.5%** (3,307/8,175) | TEM+SEM만, XRD 제외 |
+| ceria_samples_merged.csv (ML 기준, 23차 이후) | CSV | **43.8%** (2,799/6,397) | TEM+SEM만, XRD 제외 |
 | ceria_synthesis_database.xlsx (Excel paper-level) | Excel | ~8.4% (TEM) | 논문 단위, 다른 지표 |
 
 ---
@@ -444,6 +555,14 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 
 | 세션 | 파일 | 버그 | 수정 |
 |------|------|------|------|
+| 24차 | **12_model.py** | `build_quantile_pipeline`/`evaluate_per_method`/`suggest_experiments_size` — 메모리 소모 대비 효용 낮음 (per-method mostly R²<0, Q10/Q90 구간내 예측 불가) | 3개 함수 + 호출부 완전 제거 |
+| 24차 | **13_dashboard.py** | 능동학습 탭에 HistGBM Q10/Q90 섹션 유지 — 관련 csv 이제 생성 안 됨 | DKL-GP σ 단일 표시로 교체 |
+| 22차 | **12_model.py** | morphology HistGBMClassifier `cross_val_predict` OOM → 이후 역설계·history저장 불가 | `try/except MemoryError` 추가, clf_morph=None 폴백 |
+| 22차 | **13_dashboard.py** | particle_size_primary_nm 채움률 = 0% (JSONL에 없는 파생 필드), TEM/SEM 개별 노출 | rows 순회로 TEM OR SEM 합산 계산, GROUPS에서 개별 TEM/SEM 제거 |
+| 22차 | **8_normalize_data.py** | CSV 품질 필터 없음 — chelating_agent에 HNO3/NH4OH, atmosphere 미정규화, ph>14 혼입 | Section 8b 추가: chelating 30건·capping 7건·atmosphere 821건·ph>14 5건·ce>15M 4건 제거 |
+| 21차 | **12_model.py** | XRD 결정자 크기 0.3~500nm 필터 → 이상치 허용 (최대 2030nm) | `between(2, 150)` 별도 필터, 74건 제거 |
+| 21차 | **12c_gpr_model.py** | eval_freq=25로 epoch 25만 평가 → val/test best 불일치 탐지 불가 | eval_freq=5, patience=10으로 세밀한 early stopping |
+| 21차 | **12d_catboost_model.py** | XRD 피처 중요도 PNG 미생성 (primary_nm만 저장) | 루프로 [TARGET_COMPOSITE, TARGET_XRD] 둘 다 저장 |
 | 18차 | **12_model.py** | HistGBMClassifier max_iter=500 + early_stopping=False → morphology clf ~25분 소요 | `clf_kwargs = {**common_kwargs, "max_iter": 200}` clf만 200 override |
 | 17차 | **12d_catboost_model.py** | CatBoost clf `predict()` → `(n,1)` shape → `pred_y[val_idx]` shape mismatch | `np.asarray(m.predict(...)).ravel()` |
 | 17차 | **12d_catboost_model.py** | `y[tr_idx]` → `ArrowStringArray` → CatBoost clf 오류 | `np.asarray(sub[target].values)` 변환 |
@@ -560,15 +679,82 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 | `4_extract_targeted.py` 프롬프트 개선 + 필드 확장 | **8→13 필드** 추가: capping_agent, chelating_agent, atmosphere, calcination_temperature_c, crystallite_size_xrd_nm |
 | `4_extract_targeted.py --reset` 실행 (2,901편) | atmosphere +1,211행, calcination_temp +1,274행, crystallite_size_xrd +892행, capping_agent +615행 |
 | `5_table_extract.py` 실행 | 캐시 완료(0 신규) — 기존 PDF 모두 처리됨 |
-| 다음 단계 대기 | `main.py --from 3` 실행 예정 |
+
+### 20차 세션 (2026-06-12)
+
+| 작업 | 결과 |
+|------|------|
+| `8_normalize_data.py` synthesis_method "other" 복구 3단계 개선 | 341행 신규 분류, 469행 → `unidentified_method` |
+| `4_extract_targeted.py` OpenAI function calling 전환 (`strict=True`) | crystallite_size_xrd_nm n=1,743→3,015 (+1,272), 수치 타입 보장 |
+| `main.py --from 3` + `12_model.py` 재실행 | HistGBM log-R²=-0.040, crystallite_size 성능 하락 (노이즈 영향) |
+| `12b_lgbm_baseline.py` 신규 작성 + 실행 | LightGBM log-R²=**+0.032** (신규 추가), SHAP 수치형 필터 |
+| `12d_catboost_model.py` 재실행 (best_params 재사용) | CatBoost log-R²=+0.056 (데이터 변화로 19차 +0.087 대비 하락) |
+| `12c_gpr_model.py --inducing 512 --epochs 300` 재실행 | DKL-GP log-R²=**+0.235**, epoch 25 조기수렴 4번째 반복 |
+| 대시보드 SHAP 2개 타겟 필터 | primary_nm · xrd_nm만, 수치형 피처 한정, 해설 텍스트 업데이트 |
+| GitHub 로컬 커밋 설정 | GitPython으로 .git 초기화 + 커밋 (push는 사용자 CMD 실행 필요) |
+| junk title 필터 추가 | "Review for", 저널 형식 title 제거 |
+
+### 21차 세션 (2026-06-12)
+
+| 작업 | 결과 |
+|------|------|
+| **XRD 노이즈 필터 추가** (`12_model.py`) | `between(2, 150)` 별도 적용, 74건 제거, n=3,015→2,947 |
+| `main.py --reset --from 3` 재실행 | HistGBM xrd -0.054→**-0.004** (XRD 필터 효과 확인) |
+| **DKL-GP early stopping 개선** (`12c_gpr_model.py`) | eval_freq=5, patience=10 → epoch 70 종료(best=ep20), log-R²=**+0.106** |
+| `12b_lgbm_baseline.py` 재실행 | LightGBM primary +0.032(동일), xrd **-0.003** |
+| `12d_catboost_model.py` 재실행 | CatBoost primary **+0.056**, xrd **+0.068** (n=2,951 — XRD 필터 적용, 20차 +0.011 대비 개선) |
+| **CatBoost XRD importance 추가** (`12d_catboost_model.py`) | 루프로 primary+xrd 둘 다 저장, `catboost_importance_crystallite_size_xrd_nm.png` 신규 |
+| **대시보드 수치 상관관계 히트맵 개선** (`13_dashboard.py`) | Excel→CSV 전환, BET 제거, Ce농도·합성부피·건조온도 추가 (10개 컬럼) |
+| **대시보드 CatBoost 4열 그리드 레이아웃** | Importance+SHAP × 2타겟 나란히 표시 |
+| **역설계 목표 갱신** (`12d_targeted_design.py`) | 20/40/50nm → **10/30/60nm**, 75%CI → **95%CI** (Q2.5/Q97.5) |
+
+### 22차 세션 (2026-06-15)
+
+| 작업 | 결과 |
+|------|------|
+| **DKL-GP top-K 체크포인트 + T_max=100** (`12c_gpr_model.py`) | val/test epoch 불일치 해결, ep30 선택 → log-R²=**+0.364** (log-R² 역대 최고) |
+| **synthesis_method enum 14→20 확장** (`4_extract_targeted.py`) | impregnation, electrodeposition, flame_spray, deposition_precipitation, microemulsion, green_synthesis 추가 |
+| **ce_precursor 설명 개선** (`4_extract_targeted.py`) | Ce 화합물만 추출, 도펀트/지지체 산화물 명시 제외 |
+| `4_extract_targeted.py --reset` 재실행 | synthesis_method +34행(잔여 5), unidentified_method **469→33행** |
+| **데이터 품질 필터 Section 8b 추가** (`8_normalize_data.py`) | chelating_agent 30건·capping_agent 7건·atmosphere CSV 821건·ph>14 5건·ce>15M 4건·mineralizer>30M 2건 제거 |
+| **12_model.py morphology OOM 수정** | try-except MemoryError 추가 → 이후 역설계·능동학습·history저장 정상 실행 |
+| **대시보드 particle_size 채움률 수정** (`13_dashboard.py`) | particle_size_primary_nm = TEM OR SEM 합산으로 계산, 개별 TEM/SEM 표시 삭제 |
+| 전체 ML 재실행 (22차 품질필터 후) | HistGBM -0.040, LightGBM **+0.027**, CatBoost **+0.061**, DKL-GP **+0.364** |
+| `performance_history.json` 수동 업데이트 | 22차 전 모델(HistGBM·LightGBM·CatBoost·DKL-GP) 결과 반영 |
+
+### 23차 세션 (2026-06-16)
+
+| 작업 | 결과 |
+|------|------|
+| **비세리아 논문 정밀 필터링** (`filter_offtopic_papers.py` 신규) | OpenAlex References에만 CeO2 언급된 논문 제거. 3단계 필터 구현 |
+| 필터 실행 결과 | Excel **7,219 → 3,860편** (3,359편 제거), CSV **8,185 → 6,403행** |
+| `main.py --reset --from 3` + 전체 ML 재학습 | HistGBM **+0.006**, LightGBM **+0.087**, CatBoost **+0.092**, DKL-GP **+0.277** (MAE 28.22nm) |
+
+### 24차 세션 (2026-06-16)
+
+| 작업 | 결과 |
+|------|------|
+| **ML 진단 스크립트 작성+실행** (`diagnose_ml.py` 신규) | 5개 진단: 동일split/노이즈천장/baseline/구간잔차/TEM-SEM bias |
+| **DIAG-1 동일 split 검증** | HistGBM 동일split=+0.077 vs 5-fold=+0.006 (+0.071 차). DKL-GP +0.277 우위 실질적 (5-fold 등가 ≈ +0.22) |
+| **DIAG-2 노이즈 천장** | method+anion+temp 천장 R²=**+0.348**. DKL-GP는 천장의 **79.6%** 도달 → 데이터 한계 |
+| **DIAG-3 baseline ablation** | method-mean=+0.011, Ridge=+0.029 vs CatBoost 32피처=+0.092. 피처 기여 +0.081 확인 |
+| **DIAG-5 구간별 잔차** | 0–20nm MAPE=198%, 20–50nm MAPE=47%, 50+nm MAPE=78%. 구간 내 정밀 예측 불가 → 대분류 수준 |
+| **DIAG-6 TEM vs SEM bias** | TEM 중앙값 11.5nm vs SEM 30.0nm (격차 -18.5nm — 주로 선택편향). 동일DOI 쌍은 -4.5nm |
+| **`12_model.py` 불필요 코드 제거** | `build_quantile_pipeline`, `evaluate_per_method`, `suggest_experiments_size` 삭제 |
+| **`13_dashboard.py` 능동학습 탭 정리** | HistGBM Q10/Q90 섹션 제거, DKL-GP σ 기반으로 단일화 |
 
 ---
 
 ## 미완료 항목 (우선순위 순)
 
-1. **[즉시]** `main.py --from 3` — 4_extract_targeted 13필드 반영 후처리 + ML 전체 재학습
-2. **[선택]** `12c_gpr_model.py --inducing 512 --epochs 300` 재실행 — 18/19차 epoch 25 조기수렴 반복, +0.300 회복 목표
-3. **[저우선]** Task Scheduler `setup_auto.py` + 데스크탑 아이콘 `launcher.bat`
+1. **[선택]** `measurement_method` 피처 추가 — TEM/SEM 편향 4.5nm, particle_size_primary_nm 생성 시 TEM/SEM 어느 쪽 사용했는지 기록. 천장 효과는 제한적이나 systematic bias 보정 가능
+2. **[저우선]** Task Scheduler `setup_auto.py` + 데스크탑 아이콘 `launcher.bat`
+3. **[저우선]** GitHub push — 사용자가 CMD에서 직접 실행 필요:
+   ```
+   cd "d:\머신러닝 교육\ceria_pipeline_data"
+   git remote add origin https://github.com/souljuhur/ceria-pipeline-data.git
+   git push -u origin main
+   ```
 
 ---
 

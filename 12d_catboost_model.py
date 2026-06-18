@@ -217,7 +217,8 @@ def _shap_plot(model, X: pd.DataFrame, target: str, kind: str):
         mean_abs = np.abs(shap_vals).mean(axis=0)
         top_idx  = np.argsort(mean_abs)[-15:]
 
-        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+        fig, axes = plt.subplots(1, 2, figsize=(16, 6))
+        fig.suptitle(f"CatBoost SHAP — {target}", fontsize=13, fontweight="bold", y=1.02)
 
         axes[0].barh(
             [FEATURES[i] for i in top_idx],
@@ -225,7 +226,7 @@ def _shap_plot(model, X: pd.DataFrame, target: str, kind: str):
             color="#3A86FF"
         )
         axes[0].set_xlabel("Mean |SHAP value|")
-        axes[0].set_title(f"CatBoost SHAP Importance — {target}")
+        axes[0].set_title("Importance", fontsize=11)
 
         plt.sca(axes[1])
         shap.summary_plot(
@@ -235,7 +236,7 @@ def _shap_plot(model, X: pd.DataFrame, target: str, kind: str):
             show=False,
             max_display=15,
         )
-        axes[1].set_title(f"CatBoost SHAP Beeswarm — {target}")
+        axes[1].set_title("Beeswarm", fontsize=11)
 
         plt.tight_layout()
         path = os.path.join(MODEL_DIR, f"catboost_shap_{target}.png")
@@ -474,15 +475,16 @@ def main():
 
     # ── 피처 중요도 (전체 재학습 모델 사용) ────────────────────────────────
     print("\n[피처 중요도]")
-    try:
-        sub_fi = df.dropna(subset=[TARGET_COMPOSITE]).copy()
-        X_fi   = prepare_X(sub_fi)
-        y_fi   = np.log(sub_fi[TARGET_COMPOSITE].values)
-        fi_model = build_catboost("reg", best_params)
-        fi_model.fit(X_fi, y_fi)
-        plot_feature_importance(fi_model, TARGET_COMPOSITE)
-    except Exception as e:
-        print(f"  피처 중요도 오류: {e}")
+    for _fi_target in [TARGET_COMPOSITE, TARGET_XRD]:
+        try:
+            sub_fi = df.dropna(subset=[_fi_target]).copy()
+            X_fi   = prepare_X(sub_fi)
+            y_fi   = np.log(sub_fi[_fi_target].values.astype(float))
+            fi_model = build_catboost("reg", best_params)
+            fi_model.fit(X_fi, y_fi)
+            plot_feature_importance(fi_model, _fi_target)
+        except Exception as e:
+            print(f"  피처 중요도 오류 ({_fi_target}): {e}")
 
     # ── per-method 분리 모델 ─────────────────────────────────────────────────
     if not args.no_permethod:

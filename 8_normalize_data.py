@@ -758,6 +758,81 @@ if "ce_concentration_M" in df.columns and "mineralizer_concentration_M" in df.co
     n_ratio = df["ce_to_mineralizer_ratio"].notna().sum()
     print(f"\n  ce_to_mineralizer_ratio 파생: {n_ratio:,}편")
 
+# ── 8b. CSV 데이터 품질 필터 ─────────────────────────────────────────────────
+if df_csv is not None:
+    import numpy as np
+
+    # 수치 필드 타입 강제 변환 (문자열 잔재 → float)
+    _CSV_NUM_COLS = [
+        "ph_synthesis", "ce_concentration_M", "mineralizer_concentration_M",
+        "synthesis_temperature_c", "synthesis_time_h", "calcination_temperature_c",
+        "synthesis_volume_mL", "crystallite_size_xrd_nm",
+    ]
+    for _col in _CSV_NUM_COLS:
+        if _col in df_csv.columns:
+            df_csv[_col] = pd.to_numeric(df_csv[_col], errors="coerce")
+
+    # (1) chelating_agent: 킬레이트제가 아닌 물질 → NaN
+    _CHEL_INVALID = {
+        "hno3", "nitric acid", "nh4oh", "ammonium hydroxide",
+        "naoh", "sodium hydroxide", "koh", "potassium hydroxide",
+        "ethanol", "methanol", "isopropanol", "h2o", "water",
+        "coconut water", "coconut shell water",
+        "h2o2", "hydrogen peroxide", "nh3", "ammonia",
+    }
+    if "chelating_agent" in df_csv.columns:
+        _mask = df_csv["chelating_agent"].dropna().index
+        _vals = df_csv.loc[_mask, "chelating_agent"].astype(str).str.strip().str.lower()
+        _bad  = _vals.isin(_CHEL_INVALID)
+        cnt_chel = int(_bad.sum())
+        df_csv.loc[_vals[_bad].index, "chelating_agent"] = None
+        print(f"\n  [품질] chelating_agent 비킬레이트제 제거: {cnt_chel:,}건")
+
+    # (2) capping_agent: 캡핑제가 아닌 물질 → NaN
+    _CAP_INVALID = {
+        "ethanol", "methanol", "isopropanol", "h2o", "water",
+        "hno3", "nitric acid", "nh4oh", "naoh", "koh", "h2o2",
+    }
+    if "capping_agent" in df_csv.columns:
+        _mask2 = df_csv["capping_agent"].dropna().index
+        _vals2 = df_csv.loc[_mask2, "capping_agent"].astype(str).str.strip().str.lower()
+        _bad2  = _vals2.isin(_CAP_INVALID)
+        cnt_cap = int(_bad2.sum())
+        df_csv.loc[_vals2[_bad2].index, "capping_agent"] = None
+        print(f"  [품질] capping_agent 비캡핑제 제거: {cnt_cap:,}건")
+
+    # (3) atmosphere: 동일 _norm_atmosphere 함수로 정규화
+    if "atmosphere" in df_csv.columns:
+        _orig_atm = df_csv["atmosphere"].copy()
+        df_csv["atmosphere"] = df_csv["atmosphere"].apply(_norm_atmosphere)
+        _changed = _orig_atm.notna() & (
+            df_csv["atmosphere"].fillna("__null__") != _orig_atm.fillna("__null__"))
+        print(f"  [품질] atmosphere 정규화 (CSV): {int(_changed.sum()):,}건")
+
+    # (4) ph_synthesis: 물리적 범위 0~14
+    if "ph_synthesis" in df_csv.columns:
+        _ph = pd.to_numeric(df_csv["ph_synthesis"], errors="coerce")
+        _bad_ph = _ph.notna() & ~_ph.between(0, 14)
+        cnt_ph = int(_bad_ph.sum())
+        df_csv.loc[_bad_ph, "ph_synthesis"] = None
+        print(f"  [품질] ph_synthesis 범위 이탈(0~14 외) 제거: {cnt_ph:,}건")
+
+    # (5) ce_concentration_M: 물리적 상한 15M
+    if "ce_concentration_M" in df_csv.columns:
+        _ce = pd.to_numeric(df_csv["ce_concentration_M"], errors="coerce")
+        _bad_ce = _ce.notna() & (_ce > 15)
+        cnt_ce = int(_bad_ce.sum())
+        df_csv.loc[_bad_ce, "ce_concentration_M"] = None
+        print(f"  [품질] ce_concentration_M >15M 제거: {cnt_ce:,}건")
+
+    # (6) mineralizer_concentration_M: 물리적 상한 30M
+    if "mineralizer_concentration_M" in df_csv.columns:
+        _min = pd.to_numeric(df_csv["mineralizer_concentration_M"], errors="coerce")
+        _bad_min = _min.notna() & (_min > 30)
+        cnt_min = int(_bad_min.sum())
+        df_csv.loc[_bad_min, "mineralizer_concentration_M"] = None
+        print(f"  [품질] mineralizer_concentration_M >30M 제거: {cnt_min:,}건")
+
 # ── CSV 저장 (synthesis_method 정규화 + other 복구 반영) ─────────────────────
 if df_csv is not None and _has_csv:
     _tmp = _CSV_PATH.replace(".csv", "_tmp.csv")

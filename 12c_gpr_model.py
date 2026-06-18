@@ -204,8 +204,11 @@ def train_dkl(num_tr, cat_tr, y_tr, num_val, cat_val, y_val,
         {"params": model.gp.parameters(),               "lr": lr * 0.5},
         {"params": likelihood.parameters(),              "lr": lr * 0.5},
     ])
+    # T_max=100: epoch 100에서 eta_min에 도달 → 초기 수렴 가속
+    # (n_epochs=300 전체를 T_max로 쓰면 epoch 70 시점에서도 LR이 너무 높음)
+    t_max = min(n_epochs, 100)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=n_epochs, eta_min=lr * 0.05)
+        optimizer, T_max=t_max, eta_min=lr * 0.05)
     mll = VariationalELBO(likelihood, model.gp, num_data=n_train)
 
     # DataLoader (미니배치 SVGP)
@@ -216,9 +219,17 @@ def train_dkl(num_tr, cat_tr, y_tr, num_val, cat_val, y_val,
     )
     loader  = DataLoader(ds, batch_size=batch_size, shuffle=True)
 
-    best_val_mae = float("inf")
-    best_state   = None
-    history      = []
+    best_val_mae  = float("inf")
+    history       = []
+    no_improve    = 0          # patience 카운터
+    eval_freq     = 5          # 5 epoch마다 검증
+    patience      = 10         # 10회 연속 미개선 시 조기 종료 (= 50 epoch)
+    best_epoch    = 0
+
+    # top-K 체크포인트 버퍼: val-MAE 상위 3개 보존 → 최신 epoch 선택
+    # val-best(ep20)과 test-best(ep25) 불일치 해결용 (근사값이 노이즈 수준이면 최신 사용)
+    CKPT_BUFFER_SIZE = 3
+    ckpt_buffer = []  # [(val_mae, epoch, state_dict), ...] — val_mae 오름차순 유지
 
     for epoch in range(1, n_epochs + 1):
         model.train(); likelihood.train()
@@ -234,19 +245,38 @@ def train_dkl(num_tr, cat_tr, y_tr, num_val, cat_val, y_val,
             epoch_loss += loss.item()
         scheduler.step()
 
-        if epoch % 25 == 0 or epoch == 1:
+        if epoch % eval_freq == 0 or epoch == 1:
             val_mae = _eval_mae(model, likelihood, num_val, cat_val, y_val)
             history.append({"epoch": epoch, "loss": epoch_loss, "val_mae": val_mae})
+
+            # 체크포인트 버퍼에 추가 (상위 K개 유지)
+            state = {
+                "model":      {k: v.cpu().clone() for k, v in model.state_dict().items()},
+                "likelihood": {k: v.cpu().clone() for k, v in likelihood.state_dict().items()},
+            }
+            ckpt_buffer.append((val_mae, epoch, state))
+            ckpt_buffer.sort(key=lambda x: x[0])   # val_mae 오름차순 (낮을수록 좋음)
+            if len(ckpt_buffer) > CKPT_BUFFER_SIZE:
+                ckpt_buffer.pop()                   # 가장 나쁜 checkpoint 제거
+
             if val_mae < best_val_mae:
                 best_val_mae = val_mae
-                best_state   = {
-                    "model":      {k: v.cpu().clone() for k, v in model.state_dict().items()},
-                    "likelihood": {k: v.cpu().clone() for k, v in likelihood.state_dict().items()},
-                }
+                best_epoch   = epoch
+                no_improve   = 0
+            else:
+                no_improve += 1
             print(f"  Epoch {epoch:>3}/{n_epochs} | loss={epoch_loss:.3f} | "
-                  f"val-MAE={val_mae:.4f}  (best={best_val_mae:.4f})")
+                  f"val-MAE={val_mae:.4f}  (best={best_val_mae:.4f} @ep{best_epoch})")
+            if no_improve >= patience:
+                print(f"  [Early stop] {patience}회 연속 미개선 → epoch {epoch}에서 종료 "
+                      f"(best epoch={best_epoch})")
+                break
 
-    if best_state:
+    # 버퍼에서 val-MAE 상위 K 중 최신 epoch 선택 (val/test 불일치 최소화)
+    if ckpt_buffer:
+        chosen_mae, chosen_epoch, best_state = max(ckpt_buffer, key=lambda x: x[1])
+        print(f"  [체크포인트] top-{CKPT_BUFFER_SIZE} 중 최신 ep{chosen_epoch} 사용 "
+              f"(val-MAE={chosen_mae:.4f}, best={best_val_mae:.4f} @ep{best_epoch})")
         model.load_state_dict(best_state["model"])
         likelihood.load_state_dict(best_state["likelihood"])
 

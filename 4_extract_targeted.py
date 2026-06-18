@@ -63,8 +63,10 @@ Use null for any value not found or not reported."""
 # ── Function calling 스키마 (strict=True: 타입 강제 + null 안전) ──────────────
 _SYNTHESIS_METHOD_ENUM = [
     "hydrothermal", "solvothermal", "sol-gel", "precipitation", "co-precipitation",
-    "combustion", "spray_pyrolysis", "microwave", "template", "thermal_decomposition",
-    "mechanochemical", "sonochemical", "wet_chemical", "other",
+    "combustion", "spray_pyrolysis", "flame_spray", "microwave", "template",
+    "thermal_decomposition", "mechanochemical", "sonochemical", "wet_chemical",
+    "impregnation", "electrodeposition", "deposition_precipitation",
+    "microemulsion", "green_synthesis", "other",
 ]
 
 def _nullable_str(desc: str) -> dict:
@@ -101,12 +103,25 @@ _EXTRACTION_TOOL = {
                         "solvothermal=autoclave+organic solvent; "
                         "sol-gel=alkoxide/acetate hydrolysis/gelation; "
                         "precipitation/co-precipitation=rapid mixing aqueous; "
-                        "combustion=fuel+oxidizer self-ignition. "
+                        "combustion=fuel+oxidizer self-ignition; "
+                        "flame_spray=FSP/flame spray pyrolysis; "
+                        "spray_pyrolysis=aerosol/spray+pyrolysis (non-flame); "
+                        "impregnation=wet/incipient wetness impregnation; "
+                        "electrodeposition=electrochemical/electrosynthesis; "
+                        "deposition_precipitation=DP method on support; "
+                        "microemulsion=reverse/w-o microemulsion; "
+                        "green_synthesis=plant/bio-mediated synthesis. "
                         "null only if synthesis is truly not described."
                     ),
                 },
                 "ce_precursor": _nullable_str(
-                    "Cerium source as written: Ce(NO3)3·6H2O, CeCl3·7H2O, etc."
+                    "ONLY the cerium-containing compound as written: "
+                    "Ce(NO3)3·6H2O, CeCl3·7H2O, (NH4)2Ce(NO3)6, Ce(CH3COO)3, "
+                    "Ce(acac)3, Ce2(SO4)3, Ce(OiPr)3, CeO2 (if used as precursor). "
+                    "For doped CeO2, extract ONLY the Ce precursor — "
+                    "do NOT include dopant salts (Sm, Gd, Zr, Fe, Cu, etc.), "
+                    "support oxides (ZnO, Al2O3, ZrO2), or product phases. "
+                    "null if no Ce compound is explicitly mentioned."
                 ),
                 "solvent": _nullable_str(
                     "Primary liquid medium. DI/distilled water→'water'. "

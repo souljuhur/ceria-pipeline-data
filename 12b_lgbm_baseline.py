@@ -190,8 +190,9 @@ def evaluate_lgbm(df: pd.DataFrame, target: str, kind: str,
     final_model = build_lgbm(kind, params)
     final_model.fit(X, y, categorical_feature=CATEGORICAL_FEATURES)
 
-    # SHAP 분석
-    _shap_plot(final_model, X, target, kind)
+    # SHAP 분석 — primary_nm·xrd_nm만 수행 (수치형 피처 한정)
+    if target in (TARGET_COMPOSITE, TARGET_XRD) and kind == "reg":
+        _shap_plot(final_model, X, target)
 
     # 저장
     model_path = os.path.join(MODEL_DIR, f"lgbm_{target}_{kind}.pkl")
@@ -202,38 +203,53 @@ def evaluate_lgbm(df: pd.DataFrame, target: str, kind: str,
     return result
 
 
-# ── SHAP 시각화 ───────────────────────────────────────────────────────────────
-def _shap_plot(model, X: pd.DataFrame, target: str, kind: str):
+# ── SHAP 시각화 (수치형 피처만, particle_primary_nm / xrd_nm 전용) ────────────
+def _shap_plot(model, X: pd.DataFrame, target: str):
+    """SHAP Importance + Beeswarm — 수치형 피처(NUMERIC_FEATURES)만 표시.
+    범주형(synthesis_method, atmosphere, ce_precursor 등)은 제외.
+    """
     try:
-        explainer   = shap.TreeExplainer(model)
-        shap_vals   = explainer.shap_values(X)
-        # 이진/다중 분류: 리스트 반환 → 첫 번째 클래스 사용
-        if isinstance(shap_vals, list):
-            shap_vals = shap_vals[0]
+        # 수치형 피처의 열 인덱스 추출
+        num_cols = [c for c in NUMERIC_FEATURES if c in X.columns]
+        X_num    = X[num_cols]
 
-        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+        explainer = shap.TreeExplainer(model)
+        shap_all  = explainer.shap_values(X)          # 전체 피처 SHAP
+        if isinstance(shap_all, list):
+            shap_all = shap_all[0]
 
-        # 좌: bar (평균 |SHAP|)
-        mean_abs = np.abs(shap_vals).mean(axis=0)
-        top_idx  = np.argsort(mean_abs)[-15:]
+        # 수치형 열 인덱스만 추출
+        num_idx   = [list(X.columns).index(c) for c in num_cols]
+        shap_num  = shap_all[:, num_idx]               # (n_samples, n_num_features)
+
+        # 상위 15 수치형 피처 (평균 |SHAP| 기준)
+        mean_abs  = np.abs(shap_num).mean(axis=0)
+        top_k     = min(15, len(num_cols))
+        top_local = np.argsort(mean_abs)[-top_k:]      # X_num 기준 인덱스
+
+        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+        # 좌: SHAP Importance bar
         axes[0].barh(
-            [FEATURES[i] for i in top_idx],
-            mean_abs[top_idx],
-            color="#E87C4C"
+            [num_cols[i] for i in top_local],
+            mean_abs[top_local],
+            color="#E87C4C",
         )
-        axes[0].set_xlabel("Mean |SHAP value|")
-        axes[0].set_title(f"SHAP Importance — {target}")
+        axes[0].set_xlabel("Mean |SHAP value| (log-nm scale)", fontsize=10)
+        axes[0].set_title(f"SHAP Importance — {target}\n(numeric features only)", fontsize=11)
+        axes[0].tick_params(labelsize=9)
 
-        # 우: beeswarm (상위 15 피처)
+        # 우: SHAP Beeswarm
         plt.sca(axes[1])
         shap.summary_plot(
-            shap_vals[:, top_idx],
-            X.iloc[:, top_idx],
+            shap_num[:, top_local],
+            X_num.iloc[:, top_local],
             plot_type="dot",
             show=False,
-            max_display=15,
+            max_display=top_k,
         )
-        axes[1].set_title(f"SHAP Beeswarm — {target}")
+        axes[1].set_title(f"SHAP Beeswarm — {target}\n(numeric features only)", fontsize=11)
+        axes[1].tick_params(labelsize=9)
 
         plt.tight_layout()
         path = os.path.join(MODEL_DIR, f"shap_{target}.png")
