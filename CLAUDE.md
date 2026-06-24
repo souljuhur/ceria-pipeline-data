@@ -137,7 +137,7 @@ ceria_pipeline_data/
 
 ---
 
-## 현재 진행 상황 (2026-06-23 기준 — 27차 세션 완료)
+## 현재 진행 상황 (2026-06-24 기준 — 28차 세션 완료)
 
 > ⚠️ **논문 수집 중단**: 0_collect.py, 0_merge_new.py, run_weekly.py — 별도 지시 전까지 실행 금지
 
@@ -158,7 +158,8 @@ ceria_pipeline_data/
 | ML 모델 R² (xrd_nm, HistGBM) | **+0.006** (MAE=11.03nm, n=3148) ← **26차** |
 | ML 모델 R² (xrd_nm, LightGBM) | **+0.024** (MAE=11.08nm, n=3148) ← **26차** |
 | ML 모델 R² (xrd_nm, CatBoost) | **+0.126** (MAE=10.51nm, n=3157) ← **27차** |
-| unidentified_method 행 수 | **363행** (26차 재추출 후 — 25차 33행에서 증가) |
+| unidentified_method 행 수 | **286행** (28차 Section 1c 77행 복구 — 26차 363행) |
+| ce_precursor Non-Ce 정제 | **214행 NULL 처리** (28차 Section 1d — 도펀트·식물추출물 등 오분류 제거) |
 | 추출 필드 수 | **13개** (function calling strict=True 전환 완료) |
 | Excel 열 수 | **48열** (11_format_excel.py 기준) |
 
@@ -254,11 +255,13 @@ streamlit run 13_dashboard.py       # 대시보드 (http://localhost:8501)
 
 ### 다음 세션 시작 시
 
-27차 완료 상태. 전 모델 재학습 완료.
+28차 완료 상태. 전 모델 재학습 완료.
 - HistGBM -0.031 / LightGBM +0.023 / CatBoost **+0.138** / DKL-GP **+0.321** (역대 최고)
 - DKL-GP MAE **25.37nm** (전체 모델 최저, MdAE=6.44nm, PICP=0.851, n=4,249)
-- CatBoost XRD +0.126 (26차 +0.107 → +0.019 추가 개선, 신규 depth=8 params)
-- 다음 개선 후보: unidentified_method 363행 원인 분석 및 재추출 검토
+- CatBoost XRD +0.126 (신규 depth=8 params, 27차 최고)
+- ce_precursor 품질 정제 완료: Non-Ce 214행 NULL (Section 1d), unidentified_method 286행
+- GitHub 커밋 완료 (e28b5c6b). push만 남음 — CMD에서 `git push origin main` 실행 필요
+- 다음 개선 후보: `4_extract_targeted.py --reset` (~$2, ~32분) 재추출로 ce_precursor 근본 개선
 
 필요시 재학습:
 
@@ -462,6 +465,33 @@ if TARGET_XRD in df.columns:
 - **12_model.py**: `_save_performance_history(df)` → histgbm 필드 업데이트
 - 대시보드 ML 탭에서 3종 모델 log-R² / MAE 추이 차트로 시각화
 
+### ce_precursor 유효성 검증 (8_normalize_data.py — 28차 추가)
+
+`Section 1c`: unidentified_method 행 중 targeted cache에 유효한 synthesis_method가 있으면 복구 (77행 회복).  
+`Section 1d`: ce_precursor Non-Ce 화합물 → NULL 처리.
+
+```python
+def _is_ce_compound(val) -> bool:
+    if pd.isna(val): return False
+    s = str(val).strip()
+    parts = re.split(r"[;,]", s)
+    for p in parts:
+        p = p.strip()
+        if re.match(r"ce", p, re.IGNORECASE): return True          # Ce로 시작
+        if re.search(r"\b(cerium|cerous|ceric)\b", p, re.IGNORECASE): return True
+        if re.search(r"\(nh4\)[\d\s]*\[?ce", p, re.IGNORECASE): return True   # (NH4)2Ce...
+        if re.search(r"(?<![a-z])ce(?![a-z])", p, re.IGNORECASE): return True  # 단독 Ce
+    return False
+# 결과: 214행 Non-Ce → NULL (도펀트 전구체, 식물추출물, 귀금속 전구체 등 오분류)
+```
+
+**`4_extract_targeted.py` ce_precursor 프롬프트 강화 (28차)**: Ce 화합물만 추출, 아래 제외 명시:
+- 도펀트/공금속 염: La, Sm, Gd, Nd, Pr, Eu, Zr, Fe, Ni, Co, Cu, Ti, Sn 등
+- 귀금속 전구체: HAuCl4, H2PtCl6, AgNO3 등
+- 지지체/기판 산화물: TiO2, ZrO2, SiO2, SnO2, Al2O3 등
+- 유기 첨가물/폴리머: PEI, TEMED, cellulose, PVP 등
+- 식물/생물 추출물: leaf extract, plant extract 등
+
 ### anion_type 파생 규칙 (8_normalize_data.py)
 ce_precursor 문자열 → 이온 유형 분류. Unicode 첨자 정규화(`_UNICODE_SUB`) 필수.
 순서: ammonium_nitrate → nitrate → chloride → acetate → sulfate → carbonate → acetylacetonate → alkoxide → oxalate → hydroxide → carboxylate → mof → oxide → metal_ion → other
@@ -555,7 +585,7 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 
 | 기준 | 파일 | 커버리지 | 비고 |
 |------|------|---------|------|
-| ceria_samples_merged.csv (ML 기준, 23차 이후) | CSV | **43.8%** (2,799/6,397) | TEM+SEM만, XRD 제외 |
+| ceria_samples_merged.csv (ML 기준, 26차 이후) | CSV | **48.4%** (4,249/8,819) | TEM+SEM만, XRD 제외 |
 | ceria_synthesis_database.xlsx (Excel paper-level) | Excel | ~8.4% (TEM) | 논문 단위, 다른 지표 |
 
 ---
@@ -564,6 +594,10 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 
 | 세션 | 파일 | 버그 | 수정 |
 |------|------|------|------|
+| 28차 | **8_normalize_data.py** | unidentified_method 363행 — targeted cache에 유효 method 있어도 복구 안 됨 (`_is_empty()`가 "other"를 비어있다고 보지 않음) | Section 1c 추가: cache 조회로 77행 복구 (363→286) |
+| 28차 | **8_normalize_data.py** | ce_precursor에 도펀트 전구체·식물추출물 등 비세리아 물질 혼입 (265/8,791 행, ~3%) | Section 1d `_is_ce_compound()` 추가: 214행 NULL 처리 |
+| 28차 | **4_extract_targeted.py** | ce_precursor 프롬프트 불충분 — 도펀트/귀금속/지지체/유기첨가물 제외 명시 없음 | ce_precursor 스키마 설명 강화 (5개 유형 명시 제외) |
+| 28차 | **.git 권한** | CMD/Bash에서 `git add` 실패: `Unable to create index.lock: Permission denied` (Windows ACL) | gitpython `repo.index.add()` + `repo.index.commit()`으로 우회 커밋 (e28b5c6b) |
 | 24차 | **12_model.py** | `build_quantile_pipeline`/`evaluate_per_method`/`suggest_experiments_size` — 메모리 소모 대비 효용 낮음 (per-method mostly R²<0, Q10/Q90 구간내 예측 불가) | 3개 함수 + 호출부 완전 제거 |
 | 24차 | **13_dashboard.py** | 능동학습 탭에 HistGBM Q10/Q90 섹션 유지 — 관련 csv 이제 생성 안 됨 | DKL-GP σ 단일 표시로 교체 |
 | 22차 | **12_model.py** | morphology HistGBMClassifier `cross_val_predict` OOM → 이후 역설계·history저장 불가 | `try/except MemoryError` 추가, clf_morph=None 폴백 |
@@ -785,18 +819,32 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 | **CatBoost --tune** (26차 데이터 n=4,259) | Optuna 60회: depth=8, iter=669, lr=0.02444 → **신규 best_params.json 갱신** |
 | **CatBoost 재학습** (신규 params) | primary_nm **+0.138** (+0.006), xrd **+0.126** (+0.019 추가 개선) |
 
+### 28차 세션 (2026-06-24)
+
+| 작업 | 결과 |
+|------|------|
+| **unidentified_method 원인 분석** | `4_extract_targeted.py` line 431의 `_is_empty()`가 "other"를 유효값으로 처리 → targeted cache 덮어쓰기 불가 |
+| **`8_normalize_data.py` Section 1c 추가** | unidentified_method 행 중 targeted cache 조회 → **77행 복구** (363→**286행**) |
+| **ce_precursor 오염 분석** | 265/8,791행(~3%)에 도펀트 전구체·식물추출물 등 비세리아 물질 혼입 확인 |
+| **`8_normalize_data.py` Section 1d 추가** | `_is_ce_compound()` 검증: **214행 NULL 처리** (도펀트·귀금속·지지체·유기첨가물) |
+| **`4_extract_targeted.py` 프롬프트 강화** | ce_precursor 스키마: 5개 제외 유형 명시 (도펀트/귀금속/지지체/유기첨가물/식물추출물) |
+| **`setup_auto.py` 신규 작성** | Task Scheduler CeriaPipelineMonthly 등록 (매월 1일 09:00, 2026-08-01~) |
+| **`launcher.bat` 신규 작성** | 6메뉴 인터랙티브 런처 (전체파이프라인/대시보드/ML3종/DKL-GP/상태확인) |
+| **GitHub 커밋** (gitpython 우회) | `git add` index.lock Permission denied → gitpython으로 우회 커밋 (**e28b5c6b**) |
+| **Stage 3 재실행** | `main.py --reset --from 3` → ce_precursor 정제 반영 완료 |
+
 ---
 
 ## 미완료 항목 (우선순위 순)
 
-1. **[저우선]** unidentified_method 363행 원인 분석 — 26차 재추출 후 363행 발생 (25차 33행). 원인 파악 후 재추출 검토
-2. **[저우선]** Task Scheduler `setup_auto.py` + 데스크탑 아이콘 `launcher.bat`
-3. **[저우선]** GitHub push — 사용자가 CMD에서 직접 실행 필요:
-   ```
+1. **[선택]** `4_extract_targeted.py --reset` 재추출 (~$2, ~32분) — 강화된 프롬프트로 ce_precursor 근본 재정제 (현재 필터는 사후 NULL 처리)
+2. **[저우선]** GitHub push — CMD에서 직접 실행 필요:
+   ```cmd
    cd "d:\머신러닝 교육\ceria_pipeline_data"
-   git remote add origin https://github.com/souljuhur/ceria-pipeline-data.git
-   git push -u origin main
+   git push origin main
    ```
+   > 주의: `git add/commit`은 index.lock Permission denied → **gitpython 사용 권장**
+   > `python -c "import git; r=git.Repo('.'); r.index.add([...]); r.index.commit('msg')"`
 
 ---
 
