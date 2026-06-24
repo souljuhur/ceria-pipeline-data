@@ -109,6 +109,7 @@ CATEGORICAL_FEATURES = [
     "oxidant",
     "dopant",
     "atmosphere",
+    "particle_size_source",  # 측정방법 편향 보정: TEM(중앙 11.5nm) vs SEM(30.0nm)
 ]
 
 # anion_type 파생 패턴 (normalize_data.py와 동일하게 유지)

@@ -9,6 +9,7 @@ normalize_data.py — [Stage 2] 데이터 정규화
 
 이전 이름: run_cell21.py
 """
+import json
 import pandas as pd, os, re
 from pathlib import Path
 
@@ -264,6 +265,26 @@ if df_csv is not None and "synthesis_method" in df_csv.columns:
 
 # ── 1b. 'other' 텍스트 기반 재분류 (CSV 전용) ─────────────────────────────────
 # 전문 파일을 스캔해서 GPT가 'other'로 분류한 샘플의 실제 합성법 복구
+
+# targeted 캐시 로드 (0단계 fallback용)
+_TARGETED_CACHE_PATH = os.path.join(_BASE, "output", "targeted_extraction_cache.json")
+_targeted_cache: dict = {}
+if os.path.exists(_TARGETED_CACHE_PATH):
+    try:
+        with open(_TARGETED_CACHE_PATH, encoding="utf-8") as _f:
+            _targeted_cache = json.load(_f)
+    except Exception:
+        pass
+
+_VALID_METHODS = {
+    "hydrothermal", "precipitation", "sol-gel", "co-precipitation",
+    "solvothermal", "combustion", "microwave", "impregnation",
+    "thermal_decomposition", "wet_chemical", "green_synthesis",
+    "deposition_precipitation", "microemulsion", "electrodeposition",
+    "template", "mechanochemical", "spray_pyrolysis", "sonochemical",
+    "flame_spray", "freeze_drying", "pvd", "electrospinning", "ald", "cvd",
+    "continuous_flow", "ion_exchange",
+}
 # ── 복구 패턴: 고유/특이적 방법 (전체 텍스트 검색 허용 — 오탐 낮음) ────────────
 _RECOVERY_PATTERNS_DISTINCTIVE = [
     ("ald",                  ["atomic layer deposition"]),
@@ -284,6 +305,11 @@ _RECOVERY_PATTERNS_DISTINCTIVE = [
     ("electrospinning",      ["electrospinning"]),
     ("impregnation",         ["incipient wetness impregnation", "wet impregnation method"]),
     ("ion_exchange",         ["ion exchange synthesis", "ion-exchange synthesis"]),
+    ("pvd",                  ["vapor phase synthesis", "vapour phase synthesis",
+                              "vapor-phase synthesis"]),
+    ("spray_pyrolysis",      ["spray-pyrolysis method", "aerosol decomposition"]),
+    ("template",             ["hard-template synthesis", "soft-template synthesis",
+                              "nanotemplating"]),
 ]
 
 # ── 복구 패턴: 일반 방법 (실험 섹션 내 구체적 문구만 허용 — 오탐 방지) ─────────
@@ -344,11 +370,25 @@ if "tagged_methods" in df.columns and "doi" in df.columns:
             _doi_to_tags[_d] = _t
 
 def _recover_method_v2(doi: str) -> str | None:
-    """3단계 합성법 복구:
+    """4단계 합성법 복구:
+    0단계 — targeted 추출 캐시에서 유효 메서드 직접 조회
     1단계 — 실험 섹션에서 고유 방법 + 일반 방법 탐색
     2단계 — 전체 텍스트에서 고유 방법만 탐색 (오탐 방지)
     3단계 — tagged_methods 단일 태그 보조 신호
     """
+    # ── 0단계: targeted 캐시 직접 조회 ─────────────────────────────────────────
+    cache_entry = _targeted_cache.get(doi, {})
+    if cache_entry:
+        raw_m = None
+        if isinstance(cache_entry, dict):
+            raw_m = cache_entry.get("synthesis_method")
+        elif isinstance(cache_entry, list) and cache_entry:
+            raw_m = cache_entry[0].get("synthesis_method") if isinstance(cache_entry[0], dict) else None
+        if raw_m and str(raw_m).strip().lower() not in ("other", "null", "none", ""):
+            m = str(raw_m).strip()
+            if m in _VALID_METHODS:
+                return m
+
     txt_path = _TEXT_DIR / f"{_safe_fname(doi)}.txt"
 
     # ── 1·2단계: 텍스트 탐색 ────────────────────────────────────────────────
@@ -413,6 +453,80 @@ if df_csv is not None and "synthesis_method" in df_csv.columns and "doi" in df_c
     for m, n in sorted(method_counter.items(), key=lambda x: -x[1]):
         print(f"      {m:30s} +{n}행")
     print(f"    판별 불가 → unidentified_method: {unidentified}행")
+
+# ── 1c. 기존 unidentified_method 행 → targeted 캐시 재조회 (0단계만) ──────────
+if df_csv is not None and "synthesis_method" in df_csv.columns and "doi" in df_csv.columns:
+    unk_mask = df_csv["synthesis_method"].astype(str).str.strip() == "unidentified_method"
+    unk_idx  = df_csv.index[unk_mask]
+    rescued  = 0
+    rescue_counter: dict = {}
+
+    for idx in unk_idx:
+        doi = df_csv.at[idx, "doi"]
+        if pd.isna(doi):
+            continue
+        # targeted 캐시 0단계만 적용 (텍스트 재탐색은 이전 실행에서 이미 실패)
+        cache_entry = _targeted_cache.get(str(doi).strip(), {})
+        raw_m = None
+        if isinstance(cache_entry, dict):
+            raw_m = cache_entry.get("synthesis_method")
+        elif isinstance(cache_entry, list) and cache_entry:
+            raw_m = cache_entry[0].get("synthesis_method") if isinstance(cache_entry[0], dict) else None
+        if raw_m and str(raw_m).strip().lower() not in ("other", "null", "none", ""):
+            m = str(raw_m).strip()
+            if m in _VALID_METHODS:
+                df_csv.at[idx, "synthesis_method"] = m
+                rescue_counter[m] = rescue_counter.get(m, 0) + 1
+                rescued += 1
+
+    if rescued:
+        print(f"\n  unidentified_method → targeted 캐시 복구: {rescued}행")
+        for m, n in sorted(rescue_counter.items(), key=lambda x: -x[1]):
+            print(f"      {m:30s} +{n}행")
+    else:
+        print(f"\n  unidentified_method targeted 캐시 복구: 0행")
+
+# ── 1d. ce_precursor 검증 필터 — 非Ce 물질 제거 ─────────────────────────────
+# GPT가 도펀트 전구체(La/Ni/Zr 등), 지지체(TiO2/SnO2), 유기 첨가제를 혼동하여
+# ce_precursor에 잘못 기입하는 경우를 NULL로 처리한다.
+
+def _is_ce_compound(val) -> bool:
+    """Ce 원소를 실제로 포함하는 화합물이면 True."""
+    if pd.isna(val):
+        return False
+    s = str(val).strip().lower()
+    if not s or s in ("nan", "none", "null", "n/a", ""):
+        return False
+    # 세미콜론/쉼표로 분리해 각 성분 검사
+    parts = re.split(r"[;,]", s)
+    for p in parts:
+        p = p.strip()
+        if not p:
+            continue
+        # Ce로 시작하는 성분 (CeO2, Ce(NO3)3, CeCl3, CeH2.73, CeIII ... 모두 포함)
+        if re.match(r"ce", p, re.IGNORECASE):
+            return True
+        # cerium / cerous / ceric 단어 포함
+        if re.search(r"\b(cerium|cerous|ceric)\b", p, re.IGNORECASE):
+            return True
+        # (NH4)2Ce... 또는 (NH4)2[Ce... 형태
+        if re.search(r"\(nh4\)[\d\s]*\[?ce", p, re.IGNORECASE):
+            return True
+        # Ce를 원소로 포함하는 복합식: 앞뒤가 비문자인 Ce (예: La0.5Ce0.5O2)
+        if re.search(r"(?<![a-z])ce(?![a-z])", p, re.IGNORECASE):
+            return True
+    return False
+
+if df_csv is not None and "ce_precursor" in df_csv.columns:
+    ce_col = df_csv["ce_precursor"].copy()
+    nullified = 0
+    for idx in df_csv.index:
+        val = df_csv.at[idx, "ce_precursor"]
+        if pd.notna(val) and str(val).strip() not in ("", "nan", "none"):
+            if not _is_ce_compound(val):
+                df_csv.at[idx, "ce_precursor"] = None
+                nullified += 1
+    print(f"\n  [ce_precursor 검증] 非Ce 물질 → NULL 처리: {nullified}행")
 
 # ── 2. morphology 표준화 ──────────────────────────────────────────────────────
 MORPH_MAP = {
@@ -832,6 +946,28 @@ if df_csv is not None:
         cnt_min = int(_bad_min.sum())
         df_csv.loc[_bad_min, "mineralizer_concentration_M"] = None
         print(f"  [품질] mineralizer_concentration_M >30M 제거: {cnt_min:,}건")
+
+# ── 8c. particle_size_source 백필 ─────────────────────────────────────────────
+# 5_table_extract.py가 particle_size_primary_nm을 재계산할 때
+# particle_size_source를 갱신하지 않아 발생하는 누락 행 보완
+if df_csv is not None:
+    if "particle_size_source" not in df_csv.columns:
+        df_csv["particle_size_source"] = pd.NA
+    _miss_src = (
+        df_csv["particle_size_primary_nm"].notna() &
+        df_csv["particle_size_source"].isna()
+    )
+    if _miss_src.any():
+        _tem_c = "particle_size_tem_nm"
+        _sem_c = "particle_size_sem_nm"
+        _tem_ok = _miss_src & (df_csv[_tem_c].notna() if _tem_c in df_csv.columns
+                               else pd.Series(False, index=df_csv.index))
+        _sem_ok = _miss_src & ~_tem_ok & (df_csv[_sem_c].notna() if _sem_c in df_csv.columns
+                                          else pd.Series(False, index=df_csv.index))
+        df_csv.loc[_tem_ok, "particle_size_source"] = "TEM"
+        df_csv.loc[_sem_ok, "particle_size_source"] = "SEM"
+        print(f"\n  [백필] particle_size_source: TEM +{int(_tem_ok.sum())}, "
+              f"SEM +{int(_sem_ok.sum())} (총 {int(_miss_src.sum())}행)")
 
 # ── CSV 저장 (synthesis_method 정규화 + other 복구 반영) ─────────────────────
 if df_csv is not None and _has_csv:

@@ -115,13 +115,18 @@ _EXTRACTION_TOOL = {
                     ),
                 },
                 "ce_precursor": _nullable_str(
-                    "ONLY the cerium-containing compound as written: "
-                    "Ce(NO3)3·6H2O, CeCl3·7H2O, (NH4)2Ce(NO3)6, Ce(CH3COO)3, "
-                    "Ce(acac)3, Ce2(SO4)3, Ce(OiPr)3, CeO2 (if used as precursor). "
-                    "For doped CeO2, extract ONLY the Ce precursor — "
-                    "do NOT include dopant salts (Sm, Gd, Zr, Fe, Cu, etc.), "
-                    "support oxides (ZnO, Al2O3, ZrO2), or product phases. "
-                    "null if no Ce compound is explicitly mentioned."
+                    "STRICTLY the cerium-containing starting material only. "
+                    "VALID examples: Ce(NO3)3·6H2O, CeCl3·7H2O, (NH4)2Ce(NO3)6, "
+                    "Ce(CH3COO)3, Ce(acac)3, Ce2(SO4)3, Ce(OiPr)3, CeO2, CeF3, Ce2(C2O4)3. "
+                    "CRITICAL — do NOT include ANY of the following: "
+                    "(1) Dopant/co-metal salts: La, Sm, Gd, Nd, Pr, Eu, Zr, Fe, Ni, Co, "
+                    "Cu, Zn, Mn, Al, Ti, Sn, Si, Y, Ba, Sr compounds — even if in the same solution; "
+                    "(2) Noble metal precursors: HAuCl4, H2PtCl6, H2PdCl4, AgNO3, etc.; "
+                    "(3) Support/substrate oxides: TiO2, ZrO2, SiO2, SnO2, Al2O3, etc.; "
+                    "(4) Organic additives/polymers: PEI, TEMED, cellulose, PVP, etc.; "
+                    "(5) Plant/biological extracts: leaf extract, plant extract, biosource, etc.; "
+                    "(6) Solvents, acids, bases, or reducing agents. "
+                    "null if no Ce compound is explicitly used as a cerium source."
                 ),
                 "solvent": _nullable_str(
                     "Primary liquid medium. DI/distilled water→'water'. "

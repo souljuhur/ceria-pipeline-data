@@ -442,6 +442,16 @@ def main():
             if col in df.columns:
                 df["particle_size_primary_nm"] = df["particle_size_primary_nm"].fillna(df[col])
 
+        # particle_size_source 동기화 (TEM 우선)
+        if "particle_size_source" not in df.columns:
+            df["particle_size_source"] = pd.NA
+        _tem_ok2 = df["particle_size_tem_nm"].notna() if "particle_size_tem_nm" in df.columns \
+                   else pd.Series(False, index=df.index)
+        _sem_ok2 = df["particle_size_sem_nm"].notna() if "particle_size_sem_nm" in df.columns \
+                   else pd.Series(False, index=df.index)
+        df["particle_size_source"] = np.select(
+            [_tem_ok2, _sem_ok2], ["TEM", "SEM"], default=pd.NA)
+
         # 주기적 저장
         if (i + 1) % SAVE_INTERVAL == 0:
             with open(cache_path, "w", encoding="utf-8") as f:

@@ -1,22 +1,26 @@
 """
-샘플별 합성조건 → 결과 매칭 추출기
+샘플별 합성조건 → 결과 매칭 추출기 (개선판 — function calling strict=True)
 
 논문 내 여러 샘플(시편)을 식별하고, 각 샘플의 합성조건과 측정결과를 1:1 매칭.
-OpenAI gpt-4o-mini 사용. 재시작 가능 (캐시 기반).
+OpenAI function calling strict=True 사용. 병렬 20workers. 재시작 가능 (캐시 기반).
 
 출력:
-  output/ceria_samples.jsonl              — 샘플 1개 = 1행
-  output/sample_extraction_cache.json    — 진행 상황 (재시작용)
+  output/ceria_samples.jsonl           — 샘플 1개 = 1행
+  output/sample_extraction_cache.json  — 진행 상황 (재시작용)
 
 CMD:
-  python run_sample_extraction.py
-  python run_sample_extraction.py --limit 20    # 20편만 테스트
-  python run_sample_extraction.py --dry-run     # API 호출 없이 대상만 확인
+  python 2_extract.py                  # 전체 실행 (미완료 논문만)
+  python 2_extract.py --limit 20       # 20편만 테스트
+  python 2_extract.py --dry-run        # API 호출 없이 대상만 확인
+  python 2_extract.py --reset          # 캐시 초기화 + 전체 재추출 (~$6, ~15분)
+  python 2_extract.py --model gpt-4o   # 고정밀 모드 (10× 비용 — 중요 논문 재추출용)
+  python 2_extract.py --workers 10     # 동시 처리 수 조정
 """
 
-import os, json, re, time, argparse, csv
+import os, json, re, time, argparse, csv, threading
 import pandas as pd
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -53,6 +57,12 @@ ap.add_argument("--limit",   type=int, default=0,
                 help="처리할 최대 논문 수 (0=전체)")
 ap.add_argument("--dry-run", action="store_true",
                 help="API 호출 없이 대상 논문 수·예상 비용만 출력")
+ap.add_argument("--reset",   action="store_true",
+                help="캐시·출력 초기화 후 전체 재추출")
+ap.add_argument("--model",   default="gpt-4o-mini",
+                help="OpenAI 모델 (기본: gpt-4o-mini / 고정밀: gpt-4o)")
+ap.add_argument("--workers", type=int, default=20,
+                help="병렬 처리 worker 수 (기본: 20)")
 args = ap.parse_args()
 
 # ── OpenAI 초기화 ─────────────────────────────────────────────────────────────
@@ -72,7 +82,7 @@ TASK: Extract ALL distinct samples and match each sample's synthesis CONDITIONS 
 
 ━━━ KEY PRINCIPLES (READ CAREFULLY) ━━━
 1. UNIT = SAMPLE (specimen), not paper. One paper → N sample objects.
-2. Read "Experimental" AND "Results/Discussion" sections TOGETHER → link conditions & results in the SAME object (cross-section linking). Never output conditions-only or results-only.
+2. Read "Experimental" AND "Results/Discussion" sections TOGETHER → link conditions & results in the SAME object. Never output conditions-only or results-only.
 3. Samples sharing base conditions but differing in ONE variable → list each separately, COPY all shared conditions.
 4. discriminator: what makes THIS sample unique vs. siblings (e.g. "[NaOH]=6M", "calcined 500°C", "x=0.1 Sm"). Use paper labels if present ("CeO2-NC", "S1"), otherwise describe the varying variable.
 5. confidence: "high" if link is explicit in text, "medium" if inferred across sections, "low" if uncertain.
@@ -80,21 +90,81 @@ TASK: Extract ALL distinct samples and match each sample's synthesis CONDITIONS 
 7. null for any field not stated. Do NOT guess, interpolate, or copy from other samples.
 8. Numeric: plain number, no units. For ranges use midpoint ("5–20 nm" → 12.5).
 9. If no extractable synthesis data: paper_has_synthesis=false, empty samples list.
-10. MAX 8 samples per paper. For combinatorial studies with many conditions, keep samples that have at least one measured particle size (TEM/SEM/XRD). If too many, prefer samples with both conditions AND results filled.
+10. MAX 8 samples per paper. Prefer samples that have at least one measured particle size (TEM/SEM/XRD). If too many, prefer samples with both conditions AND results filled.
+
+━━━ CRITICAL ACCURACY RULES — AVOID THESE COMMON ERRORS ━━━
+
+A. PARTICLE SIZE — ACCEPT ONLY TEM/SEM DIRECT IMAGING MEASUREMENTS:
+   ✓ ACCEPT: "TEM shows 15 nm particles", "HRTEM average diameter = 12 nm", "d(TEM) = 8.3 nm",
+             "average particle size from SEM images = 25 nm", "FE-SEM diameter ~30 nm",
+             "particle size measured from TEM micrographs"
+   ✗ REJECT (use null):
+     · DLS / dynamic light scattering / z-average / hydrodynamic diameter / hydrodynamic size
+     · PDI / polydispersity index / autocorrelation / Zetasizer / NanoSight / PCS / QELS
+     · BET equivalent diameter (calculated from surface area formula d = 6/(ρ·SSA), NOT measured)
+     · Grain size from optical microscopy or EBSD
+     · Crystallite size by XRD Scherrer equation → use crystallite_size_xrd_nm instead
+     · Film thickness / coating thickness / shell thickness / pore diameter / wall thickness
+     · Probe size / aperture size / wavelength
+
+B. NUMBER PARSING — RANGES AND UNCERTAINTIES:
+   "15 ± 2 nm"             → 15    (take the central value, ignore ±)
+   "5–20 nm" / "5 to 20 nm"→ 12.5  (midpoint)
+   "~15 nm" / "≈15 nm"     → 15    (drop the approximation symbol)
+   "mostly 10–15 nm"       → 12.5  (midpoint of stated range)
+   "15 nm (range 10–20)"   → 15    (stated mean wins over range)
+   If paper provides BOTH mean and range → always take the stated mean.
+   If only a range is given (no mean stated) → take the midpoint.
+
+C. TEMPERATURE DISAMBIGUATION:
+   Rule: when two temperatures appear, lower = synthesis, higher = calcination/annealing.
+   "hydrothermal at 120°C, calcined at 550°C"  → synth=120, calc=550
+   "refluxed 80°C for 2h, then annealed 600°C" → synth=80, calc=600
+   "dried at 80°C overnight, calcined at 500°C" → drying=80, calc=500
+   "dried 120°C, then 500°C calcination"        → drying=120, calc=500
+   Room temperature (25°C) → record ONLY if paper explicitly says "synthesis at RT/room temperature".
+   Microwave power (W) is NOT a temperature — leave synthesis_temperature_c null unless °C is stated.
+
+D. SYNTHESIS METHOD — EXACT DISAMBIGUATION:
+   combustion:             fuel (glycine/urea/citric acid/PVA) + Ce(NO3)3 → ignition / auto-combustion / self-propagating step
+   precipitation:          urea or HMTA decomposed slowly at 80–100°C for homogeneous precipitation (NO ignition)
+   green_synthesis:        plant extract / algae / fungus / bacteria is the PRIMARY reducing or capping agent
+                           ⚠ NOT green_synthesis if extract is just a minor additive to a hydrothermal step
+   impregnation:           Ce solution absorbed into porous support (Al2O3/SiO2/TiO2/activated carbon) → dried → calcined
+   deposition_precipitation: precipitant (NaOH/urea) added to a support suspension containing Ce salt
+   microemulsion:          synthesis inside W/O or O/W micelle/reverse-micelle system (AOT, CTAB with oil phase)
+   microwave:              microwave (MW) is the PRIMARY heating energy — "microwave-assisted hydrothermal" → "microwave"
+   sol-gel:                alkoxide/acetate hydrolysis → gel formation; Pechini / polymeric precursor route
+   template:               hard template (SBA-15/MCM-41/AAO/PS sphere) OR soft template (vesicle/liquid crystal)
+
+E. PRECURSOR FIELD ACCURACY:
+   ce_precursor = ONLY the cerium compound (Ce source). Never include solvent or mineralizer.
+   If Ce(NO3)3·6H2O dissolved in ethanol → ce_precursor="Ce(NO3)3·6H2O", solvent="ethanol"
+   If CeO2 itself is used as starting material → ce_precursor="CeO2"
+   Dopant precursors (Gd(NO3)3, La(NO3)3, Sm(NO3)3) → dopant field only, NOT ce_precursor
+   Ce(NO3)3 and (NH4)2Ce(NO3)6 are ALWAYS ce_precursor, NEVER oxidant
+   H2O2 added separately to oxidize Ce³⁺ → Ce⁴⁺ → oxidant
+
+F. CROSS-SECTION LINKING — MOST IMPORTANT:
+   ✓ If a TABLE lists multiple samples with conditions AND sizes → each row = one sample (up to 8)
+   ✓ If paper varies ONE parameter (pH/temp/concentration) → each value = one sample
+   ✓ Read figure captions: "Fig. 3a: TEM of sample A (10 nm)" → link to sample A's conditions
+   ✗ Do NOT create a sample if you cannot find BOTH at least one condition AND one characterization result
+   Exception: allowed if paper truly lacks one side; use confidence="low" in that case
 
 ━━━ FIELD DEFINITIONS ━━━
 - ce_precursor    : Cerium source used to synthesize CeO2. Return standardized formula or name.
   · Nitrate: "Ce(NO3)3·6H2O"  (= cerium nitrate, cerous nitrate, cerium(III) nitrate hexahydrate)
-  · CAN:     "(NH4)2Ce(NO3)6" (= ceric ammonium nitrate, ammonium cerium(IV) nitrate, abbreviation "CAN")
-  · Chloride: "CeCl3·7H2O"   (= cerium(III) chloride, cerous chloride, cerium chloride heptahydrate)
+  · CAN:     "(NH4)2Ce(NO3)6" (= ceric ammonium nitrate, ammonium cerium(IV) nitrate, "CAN")
+  · Chloride: "CeCl3·7H2O"   (= cerium(III) chloride, cerous chloride)
   · Acetate: "Ce(CH3COO)3"   (= Ce(OAc)3, cerium(III) acetate, cerous acetate)
   · Sulfate: "Ce2(SO4)3", "Ce(SO4)2"   Carbonate: "Ce2(CO3)3"   Oxalate: "Ce2(C2O4)3"
-  · Sol-gel precursors: "Ce(acac)3", "Ce(OiPr)4" (cerium isopropoxide), "Ce(OEt)4" (cerium ethoxide)
-  · Other: "CeO2" (used as starting material), "Ce(OH)3", "CeF3", "Ce(TFSI)3"
+  · Sol-gel precursors: "Ce(acac)3", "Ce(OiPr)4" (cerium isopropoxide), "Ce(OEt)4"
+  · Other: "CeO2" (used as starting material), "Ce(OH)3", "CeF3"
   Output: canonical formula or abbreviation. null if not stated.
 
 - solvent         : Main liquid medium for CeO2 synthesis. Mixed → semicolon-separated ("water;ethanol").
-  · Aqueous: "water"  (deionized water, distilled water, H2O, aqueous solution → always "water")
+  · Aqueous: "water"  (deionized water, distilled water, H2O → always "water")
   · Alcohols: "ethanol", "methanol", "isopropanol", "n-butanol", "2-methoxyethanol"
   · Polyols: "ethylene glycol", "diethylene glycol", "glycerol", "propylene glycol"
     ⚠ PEG is a capping agent, NOT a solvent — put it in capping_agent
@@ -106,238 +176,235 @@ TASK: Extract ALL distinct samples and match each sample's synthesis CONDITIONS 
 
 - mineralizer : OH⁻ source / pH-raising precipitant for solution synthesis.
   Return CANONICAL LABEL. If multiple present → semicolon-separated (e.g. "NaOH; Na2CO3").
-  ⚠ Urea or glycine as COMBUSTION FUEL (auto-ignition step) → NOT mineralizer
+  ⚠ Urea or glycine as COMBUSTION FUEL (auto-ignition step) → NOT mineralizer; put in chelating_agent
   ⚠ Triethanolamine/diethanolamine as SURFACTANT → put in capping_agent instead
 
-  Canonical labels and their equivalences:
-  "NaOH"        = sodium hydroxide, caustic soda, lye
-  "KOH"         = potassium hydroxide, caustic potash
-  "LiOH"        = lithium hydroxide
-  "NH3"         = ammonia, NH3·H2O, NH4OH, ammonium hydroxide, aqueous ammonia, ammonia solution, ammonia water
-  "Urea"        = CO(NH2)2, carbamide, CH4N2O [homogeneous precipitation only, NOT combustion fuel]
-  "HMTA"        = hexamethylenetetramine, (CH2)6N4, hexamine, urotropine, methenamine, HMT
-  "TMAH"        = tetramethylammonium hydroxide, N(CH3)4OH, (CH3)4NOH
-  "Na2CO3"      = sodium carbonate, soda ash, washing soda
-  "NaHCO3"      = sodium bicarbonate, sodium hydrogen carbonate, sodium acid carbonate
-  "NH4HCO3"     = ammonium bicarbonate, ammonium hydrogen carbonate
-  "(NH4)2CO3"   = ammonium carbonate
-  "Na2C2O4"     = sodium oxalate
-  "(NH4)2C2O4"  = ammonium oxalate
-  "TEA"         = triethanolamine, 2,2',2''-nitrilotriethanol, N(C2H4OH)3 [as pH agent]
-  "DEA"         = diethanolamine, 2,2'-iminodiethanol, HN(C2H4OH)2 [as pH agent]
-  "MEA"         = monoethanolamine, ethanolamine, H2N-CH2CH2OH [as pH agent]
-  "NaOAc"       = sodium acetate, CH3COONa [mild base in acetate-based synthesis]
+  Canonical labels:
+  "NaOH" | "KOH" | "LiOH" | "NH3" (= NH4OH, ammonium hydroxide, aqueous ammonia)
+  "Urea" (homogeneous precipitation only, NOT combustion fuel)
+  "HMTA" (= hexamethylenetetramine, hexamine, HMT)
+  "TMAH" (= tetramethylammonium hydroxide)
+  "Na2CO3" | "NaHCO3" | "NH4HCO3" | "(NH4)2CO3"
+  "Na2C2O4" (sodium oxalate) | "(NH4)2C2O4" (ammonium oxalate)
+  "TEA" (triethanolamine, as pH agent) | "DEA" (diethanolamine, as pH agent)
+  "MEA" (monoethanolamine, as pH agent) | "NaOAc" (sodium acetate, mild base)
 
 - capping_agent : stabilizer/surfactant/polymer controlling particle size and shape.
   Return CANONICAL LABEL. If multiple → semicolon-separated.
   ⚠ PEG is a capping agent, NOT a solvent
-  ⚠ Triethanolamine/oleylamine: if "surfactant/ligand/capping" → here; if "pH agent" → mineralizer
 
-  Canonical labels and equivalences:
-  "PVP"         = polyvinylpyrrolidone, poly(N-vinylpyrrolidone), PVP-K30, PVP-K40, PVP K30
-  "PEG"         = polyethylene glycol, poly(ethylene glycol), PEG-200/400/600/1000/4000/6000/8000
-  "PVA"         = polyvinyl alcohol, poly(vinyl alcohol), PVOH
-  "CTAB"        = cetyltrimethylammonium bromide, hexadecyltrimethylammonium bromide, cetrimonium bromide
-  "CTAC"        = cetyltrimethylammonium chloride
-  "SDS"         = sodium dodecyl sulfate, sodium lauryl sulfate, SLS
-  "SDBS"        = sodium dodecylbenzenesulfonate, sodium dodecylbenzene sulfonate
-  "Tween-80"    = polysorbate 80, polyoxyethylene sorbitan monooleate
-  "Tween-20"    = polysorbate 20
-  "Span-80"     = sorbitan monooleate, sorbitan (Z)-mono-9-octadecenoate
-  "Triton X-100"= octylphenol ethoxylate, p-tert-octylphenol polyethoxylate, TX-100
-  "Pluronic P123"= Pluronic P-123, EO20PO70EO20, poloxamer 403
-  "Pluronic F127"= Pluronic F-127, EO106PO70EO106, poloxamer 407
-  "Pluronic F108"= Pluronic F-108
-  "Gelatin"     = gelatin, gelatine
-  "Oleic acid"  = cis-9-octadecenoic acid, C18H34O2, OA [surface ligand in organic-phase synthesis]
-  "Oleylamine"  = (Z)-octadec-9-en-1-amine, C18H37N, OAm, octadecenylamine
-  "Citrate"     = citric acid/citrate as surfactant/stabilizer (not as complexing fuel)
-  "DEA"         = diethanolamine, 2,2'-iminodiethanol [as surfactant/template]
-  "TEA"         = triethanolamine [as surfactant/template]
+  Canonical labels:
+  "PVP" (polyvinylpyrrolidone, PVP-K30/K40) | "PEG" (polyethylene glycol, PEG-200/400/1000/4000)
+  "PVA" (polyvinyl alcohol) | "CTAB" | "CTAC" | "SDS" (sodium dodecyl sulfate)
+  "SDBS" | "Tween-80" | "Tween-20" | "Span-80" | "Triton X-100"
+  "Pluronic P123" | "Pluronic F127" | "Gelatin"
+  "Oleic acid" | "Oleylamine" | "Citrate" (citric acid/citrate as surfactant/stabilizer)
+  "DEA" / "TEA" (when used as surfactant/template, not pH agent)
 
 - chelating_agent : complexing agent for controlled nucleation/gelation.
   Return CANONICAL LABEL. If multiple → semicolon-separated.
-  ⚠ "Citric acid" as chelating agent even in combustion synthesis (forms Ce complex before ignition)
-  ⚠ "Glycine" as chelating agent even in combustion (unless trivial aqueous mixing without gelation)
-  ⚠ Do NOT put acetic acid here — it is a solvent/acid, not a chelator
+  ⚠ Citric acid as chelating agent even in combustion synthesis (forms Ce complex before ignition)
+  ⚠ Glycine as chelating agent even in combustion (unless trivial aqueous mixing)
 
-  Canonical labels and equivalences:
-  "EDTA"         = ethylenediaminetetraacetic acid, C10H16N2O8, disodium EDTA, Na2-EDTA, EDTA-2Na, tetrasodium EDTA
-  "Citric acid"  = 2-hydroxypropane-1,2,3-tricarboxylic acid, C6H8O7, H3C6H5O7
-  "Acetylacetone"= pentane-2,4-dione, 2,4-pentanedione, Hacac, acac, C5H8O2
-  "Glycine"      = aminoacetic acid, 2-aminoacetic acid, H2NCH2COOH, C2H5NO2 [also combustion fuel]
-  "PVA"          = polyvinyl alcohol [Pechini/polymeric precursor method]
-  "Oxalic acid"  = ethanedioic acid, H2C2O4, C2H2O4
-  "Tartaric acid"= 2,3-dihydroxybutanedioic acid, C4H6O6, Rochelle salt (sodium tartrate form)
-  "Malic acid"   = 2-hydroxybutanedioic acid, hydroxysuccinic acid, C4H6O5
-  "Lactic acid"  = 2-hydroxypropanoic acid, C3H6O3
-  "NTA"          = nitrilotriacetic acid, N(CH2COOH)3, C6H9NO6
-  "DTPA"         = diethylenetriaminepentaacetic acid, C14H23N3O10
-  "Glucose"      = D-glucose, dextrose, C6H12O6 [Pechini-like methods]
-  "Sucrose"      = saccharose, C12H22O11
-  "Starch"       = soluble starch
-  "EDA"          = ethylenediamine, 1,2-diaminoethane, H2N(CH2)2NH2, en [Ce3+ complexation]
+  Canonical labels:
+  "EDTA" | "Citric acid" | "Acetylacetone" (= acac, Hacac)
+  "Glycine" (also combustion fuel) | "PVA" (Pechini/polymeric precursor method)
+  "Oxalic acid" | "Tartaric acid" | "Malic acid" | "Lactic acid"
+  "NTA" (nitrilotriacetic acid) | "DTPA" | "EDA" (ethylenediamine)
+  "Glucose" | "Sucrose" | "Starch"
 
-- oxidant : explicitly added oxidizing agent to promote CeO2 formation or particle formation.
-  Return CANONICAL LABEL. If multiple → semicolon-separated.
+- oxidant : explicitly added oxidizing agent to promote CeO2 formation.
   ⚠ Do NOT list Ce(NO3)3 or (NH4)2Ce(NO3)6 as oxidant — those are ce_precursor
-  ⚠ Do NOT list HNO3 if used only as counter-ion to dissolve Ce metal/oxide (use context)
-
-  Canonical labels and equivalences:
-  "H2O2"         = hydrogen peroxide, aqueous hydrogen peroxide, H₂O₂ [Ce3+→Ce4+ oxidation]
-  "HNO3"         = nitric acid, dilute nitric acid [dissolution/oxidation aid]
-  "H2SO4"        = sulfuric acid, sulphuric acid [acid dissolution]
-  "KMnO4"        = potassium permanganate
-  "(NH4)2S2O8"   = ammonium persulfate, ammonium peroxydisulfate, APS
-  "O3"           = ozone
-  "NaClO"        = sodium hypochlorite, bleach
+  Canonical labels: "H2O2" | "HNO3" | "H2SO4" | "KMnO4" | "(NH4)2S2O8" | "O3" | "NaClO"
 
 - synthesis_method: Choose EXACTLY ONE from this closed list:
-  hydrothermal       = water + sealed autoclave, 80–250°C (>100°C typical)
-  solvothermal       = organic solvent + sealed autoclave, 80–300°C
-  sol-gel            = alkoxide/acetate hydrolysis, gel network formation, Pechini/polymeric precursor
-  precipitation      = aqueous mixing of ONE Ce salt + precipitant (NaOH/NH3 etc.), no autoclave
-  co-precipitation   = TWO or more metal salts precipitated together (Ce + dopant precursor)
-  combustion         = fuel (glycine, urea, citric acid, PVA) + nitrate oxidizer → self-ignition/rapid heating
-  spray_pyrolysis    = aerosol/spray of precursor solution into hot furnace
-  microwave          = microwave radiation as PRIMARY energy source (incl. microwave-hydrothermal)
-  template           = hard template (SBA-15, AAO, PS sphere) or soft template (micelle, vesicle)
+  hydrothermal          = water + sealed autoclave, 80–250°C (>100°C typical)
+  solvothermal          = organic solvent + sealed autoclave, 80–300°C
+  sol-gel               = alkoxide/acetate hydrolysis, gel network formation, Pechini/polymeric precursor
+  precipitation         = aqueous mixing of ONE Ce salt + precipitant (NaOH/NH3 etc.), no autoclave
+  co-precipitation      = TWO or more metal salts precipitated together (Ce + dopant precursor)
+  combustion            = fuel (glycine, urea, citric acid, PVA) + nitrate oxidizer → self-ignition/rapid heating
+  spray_pyrolysis       = aerosol/spray of precursor solution into hot furnace
+  microwave             = microwave radiation as PRIMARY energy source (incl. microwave-hydrothermal)
+  template              = hard template (SBA-15, AAO, PS sphere) or soft template (micelle, vesicle)
   thermal_decomposition = solid/liquid precursor thermally decomposed (no solvent synthesis step, just calcination)
-  mechanochemical    = ball milling, high-energy milling as primary synthesis step
-  sonochemical       = ultrasound as primary energy source
-  wet_chemical       = aqueous/solution mixing without autoclave, not strictly precipitation
-  other              = anything that does not fit above
-
-  DISAMBIGUATION RULES:
-  · microwave-assisted hydrothermal → "microwave"
-  · microwave-assisted precipitation → "microwave"
-  · urea/glycine + nitrate + ignition → "combustion" (even if aqueous solution is used first)
-  · co-precipitation of Ce + dopant (Gd, La, Sm, Y, Zr, etc.) → "co-precipitation"
-  · Pechini method / polymer complexation route → "sol-gel"
-  · homogeneous precipitation (urea decomposition, no ignition) → "precipitation"
-  · reflux synthesis without autoclave → "wet_chemical"
+  mechanochemical       = ball milling, high-energy milling as primary synthesis step
+  sonochemical          = ultrasound as primary energy source
+  wet_chemical          = aqueous/solution mixing without autoclave, not strictly precipitation
+  impregnation          = Ce solution impregnated onto support (Al2O3/SiO2/TiO2) → calcined
+  electrodeposition     = electrochemical deposition of Ce oxide onto electrode surface
+  flame_spray           = flame spray pyrolysis (FSP), aerosol flame synthesis
+  deposition_precipitation = precipitant added to support suspension containing Ce precursor
+  microemulsion         = water-in-oil or oil-in-water micelle/reverse-micelle synthesis
+  green_synthesis       = plant extract / biological route as PRIMARY reducing/capping agent
+  other                 = anything that does not fit above
 
 ━━━ NUMERIC FIELDS — CRITICAL RULES ━━━
-- particle_size_tem_nm : PRIMARY particle size measured by TEM/HRTEM/STEM images (nm).
-  ✓ Accept: "TEM image shows 15 nm particles", "average diameter from TEM", "d(TEM) = 12 nm"
+- particle_size_tem_nm : PRIMARY particle size measured by TEM/HRTEM/STEM direct imaging (nm).
+  ✓ Accept: "TEM image shows 15 nm", "average diameter from TEM", "d(TEM) = 12 nm", "HRTEM = 8.3 nm"
   ✗ EXCLUDE: DLS, dynamic light scattering, hydrodynamic diameter, z-average, z-size, PDI,
-             laser diffraction, pore size, film thickness, coating thickness, wavelength,
-             precursor size, probe size. Use null if method is unspecified.
-  For a range "5–20 nm" → midpoint 12.5. Take the AVERAGE/MEAN value if explicitly stated.
-  Range: 0.5–500 nm.
+             laser diffraction, BET equivalent diameter, pore size, film thickness,
+             crystallite size from XRD (→ crystallite_size_xrd_nm). null if method is unspecified.
+  Range/uncertainty: "15 ± 2 nm" → 15. "5–20 nm" → 12.5. "~15 nm" → 15.
+  Take the AVERAGE/MEAN value if explicitly stated. Valid range: 0.5–500 nm.
 
-- particle_size_sem_nm : PRIMARY particle size from SEM/FE-SEM/FESEM images (nm). Same exclusions as TEM.
-  Range: 0.5–500 nm.
+- particle_size_sem_nm : PRIMARY particle size from SEM/FE-SEM/FESEM direct imaging (nm).
+  Same exclusion rules as particle_size_tem_nm. Valid range: 0.5–500 nm.
 
 - crystallite_size_xrd_nm : Crystallite size from XRD Scherrer equation or Rietveld refinement (nm).
-  ✓ Accept: "Scherrer equation", "XRD peak broadening", "DXRD", "D(XRD)"
-  ✗ EXCLUDE: grain/particle size from SEM/TEM, BET equivalent diameter.
-  Range: 0.5–200 nm.
+  ✓ Accept: "Scherrer equation", "XRD peak broadening", "D_XRD", "crystallite size by XRD"
+  ✗ EXCLUDE: grain/particle size from SEM/TEM, BET equivalent spherical diameter.
+  ⚠ BET equivalent diameter (d = 6/(ρ·SSA)) is NOT a crystallite size — put null here.
+  Valid range: 0.5–200 nm.
 
 - synthesis_temperature_c : Temperature DURING the synthesis reaction (°C).
-  ✓ Accept: hydrothermal temperature, reaction temperature, synthesis temperature
-  ✗ EXCLUDE: calcination/annealing temperature, drying temperature, room temperature
-    (do NOT record 25°C unless the paper explicitly says synthesis was done at room temperature).
-  Range: 20–500°C.
+  ✓ Accept: hydrothermal temperature, reaction temperature, reflux temperature
+  ✗ EXCLUDE: calcination/annealing temperature, drying temperature
+  ✗ EXCLUDE: room temperature (25°C) UNLESS paper explicitly states "RT synthesis" or "at room temperature"
+  Valid range: 20–500°C.
 
 - calcination_temperature_c : Post-synthesis annealing/calcination/sintering temperature (°C).
   ✓ Key words: "calcined at", "annealed at", "sintered at", "heated to", "fired at"
-  ✗ EXCLUDE: drying temperature (<200°C in oven before calcination), synthesis temperature.
-  RULE: If two temperatures appear — lower one is usually synthesis, higher one is calcination.
-  Range: 150–1600°C.
+  ✗ EXCLUDE: drying temperature (<200°C before calcination), synthesis temperature.
+  Rule: two temperatures → lower is synthesis, higher is calcination.
+  Valid range: 150–1600°C.
 
 - drying_temperature_c : Pre-calcination drying temperature in oven (°C).
   ✓ Key words: "dried at", "dried in oven at", "dried overnight at"
-  Typically 60–150°C. Range: 40–250°C.
+  Typically 60–150°C. Valid range: 40–250°C.
 
 - atmosphere : Gas environment during synthesis or calcination.
   Return ONE of: "air" | "N2" | "Ar" | "O2" | "H2" | "H2/N2" | "NH3" | "vacuum" | "inert" | null
-  ✓ "calcined in air at 500°C" → "air"; "annealed under Ar flow" → "Ar"
   Prefer the calcination atmosphere if synthesis atmosphere is not mentioned.
 
 - crystal_phase : Crystallographic phase identified by XRD or other techniques.
-  ✓ Common values: "fluorite cubic", "Ce2O3", "amorphous", "pyrochlore", "mixed Ce3+/Ce4+"
+  Common values: "fluorite cubic", "Ce2O3", "amorphous", "pyrochlore", "mixed"
   Use short standard names. null if not mentioned.
 
 - morphology : Particle shape from TEM/SEM images.
-  sphere = round/equiaxed particles
-  cube = cubic/box-shaped particles
-  rod = elongated 1D particles (aspect ratio >3:1)
-  wire = very long/thin 1D (nanowires, nanofibers)
-  flower = flower-like hierarchical aggregates
-  octahedron = 8-faced polyhedral particles
-  plate = thin 2D flat particles (nanoplates, nanosheets)
-  porous = particles with internal pores/channels (mesoporous, macroporous)
-  hollow = shell particles with empty interior (hollow spheres, nanocages)
-  other = any other morphology
-  null if shape not characterized.
-
-━━━ OUTPUT FORMAT (strict JSON) ━━━
-{
-  "paper_has_synthesis": true,
-  "samples": [
-    {
-      "sample_id": "string",
-      "discriminator": "string",
-      "confidence": "high|medium|low",
-      "conditions_evidence": "≤15-word hint",
-      "results_evidence": "≤15-word hint",
-      "materials": {
-        "ce_precursor": "string or null",
-        "solvent": "string or null",
-        "mineralizer": "string or null",
-        "capping_agent": "string or null",
-        "chelating_agent": "string or null",
-        "oxidant": "string or null",
-        "dopant": "element symbol or null",
-        "dopant_concentration_mol_pct": number or null
-      },
-      "procedure": {
-        "synthesis_method": "string or null",
-        "synthesis_temperature_c": number or null,
-        "synthesis_time_h": number or null,
-        "ph_synthesis": number or null,
-        "atmosphere": "string or null",
-        "calcination_temperature_c": number or null,
-        "calcination_time_h": number or null,
-        "drying_temperature_c": number or null
-      },
-      "characterization": {
-        "particle_size_tem_nm": number or null,
-        "particle_size_sem_nm": number or null,
-        "crystallite_size_xrd_nm": number or null,
-        "bet_surface_area_m2g": number or null,
-        "morphology": "sphere|cube|rod|wire|flower|octahedron|plate|porous|hollow|other or null",
-        "crystal_phase": "string or null"
-      }
-    }
-  ]
-}"""
+  sphere=round/equiaxed | cube=cubic | rod=elongated 1D (AR>3) | wire=nanowires/nanofibers
+  flower=hierarchical | octahedron=8-faced polyhedral | plate=thin 2D (nanoplates/nanosheets)
+  porous=particles with internal pores | hollow=shell particles (hollow spheres/nanocages)
+  other=any other morphology | null if shape not characterized"""
 
 USER_TEMPLATE = "Title: {title}\n\nText:\n{text}"
 
-# ── 후처리 검증 ───────────────────────────────────────────────────────────────
-_VALID_METHODS = {
+# ── Function calling 스키마 (strict=True) ─────────────────────────────────────
+_METHOD_ENUM = [
     "hydrothermal", "solvothermal", "sol-gel", "precipitation", "co-precipitation",
     "combustion", "spray_pyrolysis", "microwave", "template", "thermal_decomposition",
-    "mechanochemical", "sonochemical", "wet_chemical", "other",
+    "mechanochemical", "sonochemical", "wet_chemical",
+    "impregnation", "electrodeposition", "flame_spray",
+    "deposition_precipitation", "microemulsion", "green_synthesis", "other",
+]
+_MORPH_ENUM = ["sphere", "cube", "rod", "wire", "flower", "octahedron", "plate", "porous", "hollow", "other"]
+_ATMO_ENUM  = ["air", "N2", "Ar", "O2", "H2", "H2/N2", "NH3", "vacuum", "inert"]
+
+def _nullable(t):
+    return {"anyOf": [{"type": t}, {"type": "null"}]}
+
+def _nullable_enum(values):
+    return {"anyOf": [{"type": "string", "enum": values}, {"type": "null"}]}
+
+EXTRACT_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "extract_synthesis_samples",
+        "strict": True,
+        "description": "Extract all distinct CeO2 synthesis samples from the paper, linking synthesis conditions to measured results.",
+        "parameters": {
+            "type": "object",
+            "required": ["paper_has_synthesis", "samples"],
+            "additionalProperties": False,
+            "properties": {
+                "paper_has_synthesis": {
+                    "type": "boolean",
+                    "description": "True if the paper reports CeO2 synthesis experiments."
+                },
+                "samples": {
+                    "type": "array",
+                    "description": "One object per distinct sample. Empty list if paper_has_synthesis=false.",
+                    "items": {
+                        "type": "object",
+                        "required": ["sample_id", "discriminator", "confidence",
+                                     "conditions_evidence", "results_evidence",
+                                     "materials", "procedure", "characterization"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "sample_id":           {"type": "string"},
+                            "discriminator":       {"type": "string"},
+                            "confidence":          {"type": "string", "enum": ["high", "medium", "low"]},
+                            "conditions_evidence": {"type": "string"},
+                            "results_evidence":    {"type": "string"},
+                            "materials": {
+                                "type": "object",
+                                "required": ["ce_precursor", "solvent", "mineralizer",
+                                             "capping_agent", "chelating_agent", "oxidant",
+                                             "dopant", "dopant_concentration_mol_pct"],
+                                "additionalProperties": False,
+                                "properties": {
+                                    "ce_precursor":                 _nullable("string"),
+                                    "solvent":                      _nullable("string"),
+                                    "mineralizer":                  _nullable("string"),
+                                    "capping_agent":                _nullable("string"),
+                                    "chelating_agent":              _nullable("string"),
+                                    "oxidant":                      _nullable("string"),
+                                    "dopant":                       _nullable("string"),
+                                    "dopant_concentration_mol_pct": _nullable("number"),
+                                },
+                            },
+                            "procedure": {
+                                "type": "object",
+                                "required": ["synthesis_method", "synthesis_temperature_c",
+                                             "synthesis_time_h", "ph_synthesis", "atmosphere",
+                                             "calcination_temperature_c", "calcination_time_h",
+                                             "drying_temperature_c"],
+                                "additionalProperties": False,
+                                "properties": {
+                                    "synthesis_method":          _nullable_enum(_METHOD_ENUM),
+                                    "synthesis_temperature_c":   _nullable("number"),
+                                    "synthesis_time_h":          _nullable("number"),
+                                    "ph_synthesis":              _nullable("number"),
+                                    "atmosphere":                _nullable_enum(_ATMO_ENUM),
+                                    "calcination_temperature_c": _nullable("number"),
+                                    "calcination_time_h":        _nullable("number"),
+                                    "drying_temperature_c":      _nullable("number"),
+                                },
+                            },
+                            "characterization": {
+                                "type": "object",
+                                "required": ["particle_size_tem_nm", "particle_size_sem_nm",
+                                             "crystallite_size_xrd_nm", "bet_surface_area_m2g",
+                                             "morphology", "crystal_phase"],
+                                "additionalProperties": False,
+                                "properties": {
+                                    "particle_size_tem_nm":    _nullable("number"),
+                                    "particle_size_sem_nm":    _nullable("number"),
+                                    "crystallite_size_xrd_nm": _nullable("number"),
+                                    "bet_surface_area_m2g":    _nullable("number"),
+                                    "morphology":              _nullable_enum(_MORPH_ENUM),
+                                    "crystal_phase":           _nullable("string"),
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
 }
-_VALID_MORPHS = {
-    "sphere", "cube", "rod", "wire", "flower", "octahedron",
-    "plate", "porous", "hollow", "other",
-}
-_VALID_ATMO = {
-    "air", "n2", "ar", "o2", "h2", "h2/n2", "nh3", "vacuum", "inert",
-}
-# GPT가 반환하는 null 표현 문자열
-_NULL_STRINGS = {
+
+# ── 후처리 검증 ───────────────────────────────────────────────────────────────
+_VALID_METHODS = set(_METHOD_ENUM)
+_VALID_MORPHS  = set(_MORPH_ENUM)
+_VALID_ATMO    = {a.lower() for a in _ATMO_ENUM}
+_NULL_STRINGS  = {
     "", "null", "none", "n/a", "na", "nan", "unknown",
     "not stated", "not reported", "not mentioned", "not specified",
     "not found", "not available", "not applicable", "not given",
 }
 
 def _clean_str(v):
-    """문자열이 null 표현이면 None 반환, 아니면 strip된 문자열."""
     if v is None:
         return None
     if not isinstance(v, str):
@@ -346,7 +413,6 @@ def _clean_str(v):
     return None if stripped.lower() in _NULL_STRINGS else stripped
 
 def _clamp_num(v, lo, hi):
-    """숫자 범위 검사. 범위 밖이거나 변환 실패면 None."""
     if v is None:
         return None
     try:
@@ -356,24 +422,18 @@ def _clamp_num(v, lo, hi):
         return None
 
 def _validate_sample(s: dict) -> dict:
-    """수치 범위 + 허용값 집합 + null 문자열 정규화. 무효값은 None으로."""
     if not isinstance(s, dict):
         return s
-
     mat  = s.get("materials")  or {}
     proc = s.get("procedure")  or {}
     char = s.get("characterization") or {}
 
-    # ── materials: 문자열 필드 정규화 ──────────────────────────────────────
     for field in ("ce_precursor", "solvent", "mineralizer",
                   "capping_agent", "chelating_agent", "oxidant", "dopant"):
         mat[field] = _clean_str(mat.get(field))
-
     mat["dopant_concentration_mol_pct"] = _clamp_num(
-        mat.get("dopant_concentration_mol_pct"), 0.0, 100.0
-    )
+        mat.get("dopant_concentration_mol_pct"), 0.0, 100.0)
 
-    # ── procedure: 수치 범위 검사 + 문자열 정규화 ──────────────────────────
     proc["synthesis_temperature_c"]   = _clamp_num(proc.get("synthesis_temperature_c"),   20,   500)
     proc["calcination_temperature_c"] = _clamp_num(proc.get("calcination_temperature_c"), 150, 1600)
     proc["drying_temperature_c"]      = _clamp_num(proc.get("drying_temperature_c"),       40,  250)
@@ -381,33 +441,20 @@ def _validate_sample(s: dict) -> dict:
     proc["calcination_time_h"]        = _clamp_num(proc.get("calcination_time_h"),        0.01,  240)
     proc["ph_synthesis"]              = _clamp_num(proc.get("ph_synthesis"),              0.0,  14.0)
 
-    # synthesis_method 허용값
     sm = _clean_str(proc.get("synthesis_method"))
-    if sm:
-        proc["synthesis_method"] = sm if sm.lower() in _VALID_METHODS else "other"
-    else:
-        proc["synthesis_method"] = None
+    proc["synthesis_method"] = (sm if sm and sm.lower() in _VALID_METHODS else
+                                sm.lower() if sm else None)
 
-    # atmosphere 정규화
     atm = _clean_str(proc.get("atmosphere"))
-    if atm:
-        proc["atmosphere"] = atm if atm.lower() in _VALID_ATMO else atm  # 비표준도 보존
-    else:
-        proc["atmosphere"] = None
+    proc["atmosphere"] = atm  # 비표준도 보존
 
-    # ── characterization: 수치 범위 + 문자열 정규화 ────────────────────────
     char["particle_size_tem_nm"]    = _clamp_num(char.get("particle_size_tem_nm"),    0.3, 500)
     char["particle_size_sem_nm"]    = _clamp_num(char.get("particle_size_sem_nm"),    0.3, 500)
     char["crystallite_size_xrd_nm"] = _clamp_num(char.get("crystallite_size_xrd_nm"), 0.3, 200)
     char["bet_surface_area_m2g"]    = _clamp_num(char.get("bet_surface_area_m2g"),    0.1, 1500)
 
-    # morphology 허용값
     mo = _clean_str(char.get("morphology"))
-    if mo:
-        char["morphology"] = mo if mo.lower() in _VALID_MORPHS else "other"
-    else:
-        char["morphology"] = None
-
+    char["morphology"] = mo if mo and mo.lower() in _VALID_MORPHS else ("other" if mo else None)
     char["crystal_phase"] = _clean_str(char.get("crystal_phase"))
 
     s["materials"]        = mat
@@ -446,8 +493,8 @@ _END_RE = re.compile(
     r'\s*\n', re.I
 )
 
-def extract_relevant_sections(text: str, max_chars: int = 12000) -> str:
-    """실험 섹션 + 결과 섹션을 합쳐서 반환 (4:6 비율 배분).
+def extract_relevant_sections(text: str, max_chars: int = 16000) -> str:
+    """실험 섹션 + 결과 섹션을 합쳐서 반환 (45:55 비율).
     섹션 감지 실패 시 초반 + 중반 텍스트로 폴백."""
     exp_m = _EXP_RE.search(text)
     res_m = _RES_RE.search(text)
@@ -465,7 +512,6 @@ def extract_relevant_sections(text: str, max_chars: int = 12000) -> str:
         )
 
     if exp_m:
-        # 실험 섹션만 찾은 경우: 실험(60%) + 논문 후반부(40%, 결과 포함 가능)
         exp_text = text[exp_m.end(): end_pos].strip()
         exp_alloc = int(max_chars * 0.6)
         tail_start = max(exp_m.end(), int(len(text) * 0.5))
@@ -476,7 +522,6 @@ def extract_relevant_sections(text: str, max_chars: int = 12000) -> str:
         )
 
     if res_m:
-        # 결과 섹션만 찾은 경우: 논문 앞부분(40%) + 결과(60%)
         res_text = text[res_m.end(): end_pos].strip()
         head_text = text[:int(max_chars * 0.4)].strip()
         return (
@@ -484,7 +529,6 @@ def extract_relevant_sections(text: str, max_chars: int = 12000) -> str:
             + "\n\n[RESULTS]\n" + res_text[:int(max_chars * 0.6)]
         )
 
-    # 섹션 감지 실패: 앞 75% + 뒤 25% (결론·참고문헌 제외)
     front = text[:int(max_chars * 0.75)]
     back  = text[max(0, end_pos - int(max_chars * 0.25)): end_pos]
     return front + ("\n\n" + back if back.strip() else "")
@@ -496,7 +540,6 @@ def doi_to_stem(doi) -> str:
     return str(doi).strip().replace("/", "_").replace(":", "_").lower()
 
 def _load_xlsx_safe(path):
-    """요약행 자동 감지 후 헤더 행 결정 (format_excel.py 출력 대비)."""
     raw = pd.read_excel(path, sheet_name=0, header=None, nrows=15)
     for idx, row in raw.iterrows():
         if any(str(v).strip().lower() == "doi" for v in row):
@@ -504,19 +547,25 @@ def _load_xlsx_safe(path):
     return pd.read_excel(path, sheet_name=0)
 
 # ── 캐시 로드 ─────────────────────────────────────────────────────────────────
-if os.path.exists(CACHE_PATH):
+if args.reset:
+    for p in [CACHE_PATH, OUT_JSONL, OUT_CSV]:
+        if os.path.exists(p):
+            os.remove(p)
+    print("캐시 초기화 완료 — 전체 재추출")
+
+if os.path.exists(CACHE_PATH) and not args.reset:
     with open(CACHE_PATH, encoding="utf-8") as f:
         _cache = json.load(f)
-    done_dois    = set(_cache.get("done_dois", []))
+    done_dois     = set(_cache.get("done_dois", []))
     total_samples = _cache.get("total_samples", 0)
     print(f"캐시 로드: {len(done_dois):,}편 완료, 누적 {total_samples:,}개 샘플")
 else:
-    done_dois    = set()
+    done_dois     = set()
     total_samples = 0
     print("캐시 없음 — 처음부터 시작")
 
-# 캐시 소실 대비: 기존 CSV에서 이미 처리된 DOI 추가 수집
-if os.path.exists(OUT_CSV):
+# 캐시 소실 대비: 기존 CSV에서 이미 처리된 DOI 추가
+if os.path.exists(OUT_CSV) and not args.reset:
     try:
         _csv_prev = pd.read_csv(OUT_CSV, usecols=["doi"], dtype=str)
         _csv_dois = set(_csv_prev["doi"].dropna().str.strip().tolist())
@@ -552,154 +601,161 @@ if args.limit:
     targets = targets[: args.limit]
 
 print(f"처리 대상: {len(targets):,}편 (전문 있고 미완료)")
-est_cost = len(targets) * 0.0008
-print(f"예상 비용: 약 ${est_cost:.2f} (gpt-4o-mini 기준)\n")
+cost_per_paper = 0.003 if "gpt-4o" in args.model and "mini" not in args.model else 0.0008
+est_cost = len(targets) * cost_per_paper
+print(f"모델: {args.model}  |  예상 비용: 약 ${est_cost:.2f}  |  workers: {args.workers}\n")
 
 if args.dry_run:
     print("--dry-run 모드 종료 (API 호출 없음)")
     raise SystemExit(0)
 
-# ── 추출 루프 ─────────────────────────────────────────────────────────────────
-new_samples = 0
-errors      = 0
+# ── 단일 논문 추출 함수 (병렬 실행 단위) ────────────────────────────────────
+def _process_one(paper):
+    """(doi, samples, is_error) 반환. samples=None은 오류, []=합성없음."""
+    doi, stem, title = paper["doi"], paper["stem"], paper["title"]
+    try:
+        with open(os.path.join(TEXT_DIR, stem + ".txt"),
+                  encoding="utf-8", errors="replace") as f:
+            raw = f.read()
+    except Exception:
+        return doi, None, True
+
+    snippet = extract_relevant_sections(raw, max_chars=16000)
+    if len(snippet) < 200:
+        return doi, [], False
+
+    for attempt in range(3):
+        try:
+            resp = client.chat.completions.create(
+                model=args.model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",   "content": USER_TEMPLATE.format(
+                        title=title, text=snippet)},
+                ],
+                tools=[EXTRACT_TOOL],
+                tool_choice={"type": "function",
+                             "function": {"name": "extract_synthesis_samples"}},
+                max_tokens=4096,
+                temperature=0,
+            )
+            tc = resp.choices[0].message.tool_calls[0]
+            parsed = json.loads(tc.function.arguments)
+            samples = (parsed.get("samples", [])
+                       if parsed.get("paper_has_synthesis", True) else [])
+            return doi, samples, False
+        except Exception as e:
+            err_str = str(e)
+            wait = 10 if ("429" in err_str or "rate" in err_str.lower()) else (2 ** attempt * 3)
+            if attempt < 2:
+                time.sleep(wait)
+            else:
+                return doi, None, True
+
+    return doi, None, True
+
+# ── 추출 루프 (병렬) ──────────────────────────────────────────────────────────
+_write_lock   = threading.Lock()
+_done_lock    = threading.Lock()
+new_samples   = 0
+errors        = 0
+processed     = 0
 
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 csv_is_new = not os.path.exists(OUT_CSV)
 
 with open(OUT_JSONL, "a", encoding="utf-8") as out_f, \
-     open(OUT_CSV, "a", encoding="utf-8", newline="") as csv_f:
+     open(OUT_CSV,   "a", encoding="utf-8", newline="") as csv_f:
+
     csv_writer = csv.DictWriter(csv_f, fieldnames=CSV_COLUMNS, extrasaction="ignore")
     if csv_is_new:
         csv_writer.writeheader()
-    for i, paper in enumerate(tqdm(targets, desc="샘플 추출")):
-        doi   = paper["doi"]
-        stem  = paper["stem"]
-        title = paper["title"]
 
-        # 텍스트 로드
-        try:
-            with open(os.path.join(TEXT_DIR, stem + ".txt"),
-                      encoding="utf-8", errors="replace") as f:
-                raw = f.read()
-        except Exception:
-            errors += 1
-            done_dois.add(doi)
-            continue
+    with ThreadPoolExecutor(max_workers=args.workers) as executor:
+        futures = {executor.submit(_process_one, p): p for p in targets}
+        pbar    = tqdm(total=len(targets), desc="샘플 추출")
 
-        snippet = extract_relevant_sections(raw, max_chars=12000)
-        if len(snippet) < 200:
-            done_dois.add(doi)
-            continue
+        for future in as_completed(futures):
+            paper = futures[future]
+            doi   = paper["doi"]
+            title = paper["title"]
 
-        # OpenAI 호출 (최대 3회 재시도, 지수 백오프)
-        samples = None
-        for attempt in range(3):
             try:
-                resp = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user",   "content": USER_TEMPLATE.format(
-                            title=title, text=snippet)},
-                    ],
-                    max_tokens=2500,
-                    temperature=0,
-                    response_format={"type": "json_object"},
-                )
-                raw_resp = resp.choices[0].message.content.strip()
-                parsed = json.loads(raw_resp)
-                if parsed.get("paper_has_synthesis", True):
-                    samples = parsed.get("samples", [])
-                else:
-                    samples = []
-                break
-            except json.JSONDecodeError:
-                # response_format 보장 실패 시 정규식 폴백
-                try:
-                    m = re.search(r"\{.*\}", raw_resp, re.DOTALL)
-                    if m:
-                        parsed = json.loads(m.group())
-                        samples = parsed.get("samples", []) if parsed.get("paper_has_synthesis", True) else []
-                        break
-                except Exception:
-                    pass
-                if attempt < 2:
-                    time.sleep(2 ** attempt * 2)
+                doi_r, samples, is_error = future.result()
             except Exception as e:
-                if attempt < 2:
-                    time.sleep(2 ** attempt * 3)
-                else:
-                    tqdm.write(f"  오류 ({doi[:35]}): {e}")
+                tqdm.write(f"  예외 ({doi[:40]}): {e}")
+                is_error = True
+                samples  = None
+
+            with _done_lock:
+                done_dois.add(doi)
+
+            if is_error:
+                with _write_lock:
                     errors += 1
+            elif isinstance(samples, list) and samples:
+                # 샘플 수 상한 (8개): 입자크기 있는 샘플 우선
+                if len(samples) > 8:
+                    has_ps = [s for s in samples if isinstance(s, dict) and (
+                        (s.get("characterization") or {}).get("particle_size_tem_nm") or
+                        (s.get("characterization") or {}).get("particle_size_sem_nm") or
+                        (s.get("characterization") or {}).get("crystallite_size_xrd_nm")
+                    )]
+                    no_ps  = [s for s in samples if s not in has_ps]
+                    samples = (has_ps + no_ps)[:8]
 
-        done_dois.add(doi)
+                with _write_lock:
+                    for s in samples:
+                        if not isinstance(s, dict):
+                            continue
+                        s    = _validate_sample(s)
+                        mat  = s.get("materials")        or {}
+                        proc = s.get("procedure")        or {}
+                        char = s.get("characterization") or {}
+                        record = {
+                            "doi":   doi,
+                            "title": title,
+                            "sample_id":             s.get("sample_id", "S1"),
+                            "discriminator":         s.get("discriminator", ""),
+                            "confidence":            s.get("confidence", "medium"),
+                            "conditions_evidence":   s.get("conditions_evidence", ""),
+                            "results_evidence":      s.get("results_evidence", ""),
+                            "materials":             mat,
+                            "procedure":             proc,
+                            "characterization":      char,
+                            "synthesis_conditions":  {**mat, **proc},
+                        }
+                        csv_row = {
+                            "doi": doi, "title": title,
+                            "sample_id":           record["sample_id"],
+                            "discriminator":       record["discriminator"],
+                            "confidence":          record["confidence"],
+                            "conditions_evidence": record["conditions_evidence"],
+                            "results_evidence":    record["results_evidence"],
+                            **mat, **proc, **char,
+                        }
+                        csv_writer.writerow(csv_row)
+                        out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                        new_samples += 1
 
-        if not isinstance(samples, list):
-            continue
+                    # 주기적 캐시 저장
+                    processed += 1
+                    if processed % SAVE_INTERVAL == 0:
+                        with open(CACHE_PATH, "w", encoding="utf-8") as cf:
+                            json.dump({"done_dois": list(done_dois),
+                                       "total_samples": new_samples}, cf)
+                        out_f.flush()
+                        csv_f.flush()
+                        tqdm.write(f"  [{processed:,}편] 누적 샘플 {new_samples:,}개")
 
-        # 샘플 수 상한 (8개): 입자크기 있는 샘플 우선, 없으면 앞에서 자름
-        if len(samples) > 8:
-            has_ps = [s for s in samples if isinstance(s, dict) and (
-                (s.get("characterization") or {}).get("particle_size_tem_nm") or
-                (s.get("characterization") or {}).get("crystallite_size_xrd_nm") or
-                (s.get("characterization") or {}).get("particle_size_sem_nm")
-            )]
-            no_ps  = [s for s in samples if s not in has_ps]
-            samples = (has_ps + no_ps)[:8]
-
-        # 샘플별 레코드 저장
-        for s in samples:
-            if not isinstance(s, dict):
-                continue
-            s = _validate_sample(s)
-            mat   = s.get("materials") or {}
-            proc  = s.get("procedure") or {}
-            char  = s.get("characterization") or {}
-            record = {
-                "doi":          doi,
-                "title":        title,
-                "sample_id":    s.get("sample_id", "S1"),
-                "discriminator":    s.get("discriminator", ""),
-                "confidence":       s.get("confidence", "medium"),
-                "conditions_evidence": s.get("conditions_evidence", ""),
-                "results_evidence":    s.get("results_evidence", ""),
-                "materials":    mat,
-                "procedure":    proc,
-                "characterization": char,
-                # 하위 호환 키
-                "synthesis_conditions": {**mat, **proc},
-            }
-            # CSV 행 (평탄화)
-            csv_row = {
-                "doi": doi, "title": title,
-                "sample_id":    record["sample_id"],
-                "discriminator": record["discriminator"],
-                "confidence":   record["confidence"],
-                "conditions_evidence": record["conditions_evidence"],
-                "results_evidence":    record["results_evidence"],
-                **mat, **proc, **char,
-            }
-            csv_writer.writerow(csv_row)
-            out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
-            new_samples += 1
-        total_samples += len(samples)
-
-        # 주기적 캐시 저장
-        if (i + 1) % SAVE_INTERVAL == 0:
-            with open(CACHE_PATH, "w", encoding="utf-8") as cf:
-                json.dump({"done_dois": list(done_dois),
-                           "total_samples": total_samples}, cf)
-            tqdm.write(f"  [{i+1:,}편] 누적 샘플 {total_samples:,}개 저장")
-
-        time.sleep(0.05)
+            pbar.update(1)
+        pbar.close()
 
 # 최종 캐시 저장
 with open(CACHE_PATH, "w", encoding="utf-8") as cf:
-    json.dump({"done_dois": list(done_dois), "total_samples": total_samples}, cf)
+    json.dump({"done_dois": list(done_dois),
+               "total_samples": new_samples}, cf)
 
 print(f"\n완료!")
-print(f"  처리: {len(targets):,}편")
-print(f"  신규 샘플: {new_samples:,}개")
-print(f"  누적 샘플: {total_samples:,}개")
-print(f"  오류: {errors}건")
+print(f"  처리: {len(targets):,}편  |  신규 샘플: {new_samples:,}개  |  오류: {errors}건")
 print(f"  출력: {OUT_JSONL}")

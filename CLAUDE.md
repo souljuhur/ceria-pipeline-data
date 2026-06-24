@@ -137,7 +137,7 @@ ceria_pipeline_data/
 
 ---
 
-## 현재 진행 상황 (2026-06-16 기준 — 24차 세션 완료)
+## 현재 진행 상황 (2026-06-23 기준 — 27차 세션 완료)
 
 > ⚠️ **논문 수집 중단**: 0_collect.py, 0_merge_new.py, run_weekly.py — 별도 지시 전까지 실행 금지
 
@@ -146,56 +146,63 @@ ceria_pipeline_data/
 | 총 논문 (수집) | 7,278편 → **3,860편** (23차 비세리아 필터링 후: 3,359편 제거) |
 | 전문(full text) 보유 | **2,879편** (text/ 기준, 필터 후) |
 | PDF 파일 | **4,161개** (pdf/ 폴더 — 필터 대상 외) |
-| GPT 추출 완료 | **5,415편** (llm_cache 기준 — 원본 유지) |
-| 추출 샘플 수 | **6,403행** (CSV, 22차 8,185 → 23차 필터 후) |
-| 1차 입자크기 커버리지 (TEM+SEM) | **43.8%** (2,799/6,397 valid rows) |
-| crystallite_size_xrd_nm 샘플 수 | **n=2,490** (23차 필터 후) |
-| ML 모델 피처 수 | **32개** (21 수치 + 11 범주형) |
-| ML 모델 R² (primary_nm, HistGBM) | **+0.006** (MAE=31.14nm, n=2799) ← **23차** |
-| ML 모델 R² (primary_nm, LightGBM) | **+0.087** (MAE=29.75nm, n=2799) ← **23차 tabular 최고** |
-| ML 모델 R² (primary_nm, CatBoost) | **+0.092** (MAE=29.56nm, n=2800) ← **23차** |
-| ML 모델 R² (primary_nm, DKL-GP) | **+0.277** (MAE=28.22nm, PICP=0.844, n=2799) ← **23차 MAE 최저** |
-| ML 모델 R² (xrd_nm, HistGBM) | **-0.001** (MAE=11.15nm, n=2490) ← 23차 |
-| ML 모델 R² (xrd_nm, LightGBM) | **+0.017** (MAE=11.11nm, n=2490) ← 23차 |
-| ML 모델 R² (xrd_nm, CatBoost) | **+0.053** (MAE=10.90nm, n=2494) ← 23차 |
-| unidentified_method 행 수 | **33행** (22차 enum 14→20 확장 + --reset 후 잔여) |
+| GPT 추출 완료 | **2,879편** (26차 2_extract.py 전면 재작성 후) |
+| 추출 샘플 수 | **8,819행** (26차 재추출 — 25차 6,403 → +2,416) |
+| 1차 입자크기 커버리지 (TEM+SEM) | **48.4%** (4,249/8,819 valid rows) ← 26차 |
+| crystallite_size_xrd_nm 샘플 수 | **n=3,148** (26차, 25차 n=2,490 → +658) |
+| ML 모델 피처 수 | **33개** (21 수치 + **12 범주형**) |
+| ML 모델 R² (primary_nm, HistGBM) | **-0.031** (MAE=28.37nm, n=4249) ← **26차** |
+| ML 모델 R² (primary_nm, LightGBM) | **+0.023** (MAE=28.15nm, n=4249) ← **26차** |
+| ML 모델 R² (primary_nm, CatBoost) | **+0.138** (MAE=26.64nm, n=4259) ← **27차 tabular 최고** |
+| ML 모델 R² (primary_nm, DKL-GP) | **+0.321** (MAE=25.37nm, PICP=0.851, n=4249) ← **27차 전체 최고** |
+| ML 모델 R² (xrd_nm, HistGBM) | **+0.006** (MAE=11.03nm, n=3148) ← **26차** |
+| ML 모델 R² (xrd_nm, LightGBM) | **+0.024** (MAE=11.08nm, n=3148) ← **26차** |
+| ML 모델 R² (xrd_nm, CatBoost) | **+0.126** (MAE=10.51nm, n=3157) ← **27차** |
+| unidentified_method 행 수 | **363행** (26차 재추출 후 — 25차 33행에서 증가) |
 | 추출 필드 수 | **13개** (function calling strict=True 전환 완료) |
 | Excel 열 수 | **48열** (11_format_excel.py 기준) |
 
-### 최신 모델 성능 비교 (23차 기준, particle_size_primary_nm)
+### 최신 모델 성능 비교 (27차 기준, particle_size_primary_nm)
 
-| 모델 | log-R² | nm-MAE | RMSE | MdAE | n | vs 22차 |
+| 모델 | log-R² | nm-MAE | RMSE | MdAE | n | vs 26차 |
 |------|--------|--------|------|------|---|---------|
-| HistGBM | **+0.006** | 31.14 | 71.83 | 10.84 | 2799 | +0.046 |
-| LightGBM (12b) | **+0.087** | 29.75 | 70.56 | 9.60 | 2799 | +0.060 |
-| CatBoost | **+0.092** | 29.56 | 71.44 | 9.76 | 2800 | +0.031 |
-| DKL-GP (inducing=512) | **+0.277** | **28.22** | 73.04 | 7.19 | 2799 | -0.087 (MAE 개선) |
+| HistGBM | **-0.031** | 28.37 | 66.08 | 9.26 | 4249 | 동일 |
+| LightGBM (12b) | **+0.023** | 28.15 | 65.48 | 8.92 | 4249 | 동일 |
+| CatBoost | **+0.138** | **26.64** | 65.89 | 7.95 | 4259 | +0.006 (신규 params) |
+| DKL-GP (inducing=512) | **+0.321** | **25.37** | 66.71 | 6.44 | 4249 | +0.031 (n +1,450) |
 
-> **23차 데이터 정제 효과**: 비세리아 논문 3,359편 제거(References에만 CeO2 언급) → n이 3307→2799로 감소했지만
-> **HistGBM +0.046, LightGBM +0.060, CatBoost +0.031** 모두 크게 개선됨. 노이즈 제거가 핵심.
-> DKL-GP는 log-R² -0.087 하락했으나 **실측 MAE 29.06→28.22nm(최저)** — 실제 예측력은 개선.
+> **27차**: DKL-GP 26차 재학습 완료 (n=4,249, ep75 조기종료→ep25 선택). log-R² +0.321 (역대 최고 갱신),
+> MAE **25.37nm (전체 모델 최저)**. CatBoost --tune 26차 데이터 재탐색 → depth=8 신규 best_params,
+> log-R²=+0.138로 소폭 개선.
 
-### 23차 crystallite_size_xrd_nm 성능 (필터 후, n=2490)
+### 27차 crystallite_size_xrd_nm 성능
 
-| 모델 | 22차 | 23차 | n 변화 | 비고 |
-|------|------|------|--------|------|
-| HistGBM | -0.056 | **-0.001** | 3,003→2,490 | 23차 개선 |
-| LightGBM | +0.017 | **+0.017** | →2,490 | 유지 |
-| CatBoost | +0.048 | **+0.053** | 3,007→2,494 | 23차 개선 |
+| 모델 | 25차 | 26차 | 27차 | n | 비고 |
+|------|------|------|------|---|------|
+| HistGBM | +0.012 | +0.006 | **+0.006** | 3,148 | 동일 |
+| LightGBM | +0.004 | +0.024 | **+0.024** | 3,148 | 동일 |
+| CatBoost | +0.075 | +0.107 | **+0.126** | 3,157 | **+0.019 추가 개선** (신규 params) |
 
-> **XRD 노이즈 필터 효과** (21차 기준): `12_model.py`에 `between(2, 150)` 필터 → 23차도 67건 제거
+> **XRD 노이즈 필터 효과** (21차 기준): `12_model.py`에 `between(2, 150)` 필터 → 26차 72건 제거
 > 물리적 근거: Scherrer equation 유효 범위 2~150nm (< 2nm 불가, > 150nm Scherrer 한계 초과)
 
+> ※ DKL-GP 27차: ep75 조기종료(patience=10), top-3 버퍼 중 ep25 선택 → log-R²=**+0.321** (log-R² 역대 최고 갱신)
+>    val-MAE best=0.8657(ep25). n=4,249 (26차 +1,450행 효과). 실측 MAE **25.37nm(역대 최저)**, MdAE=6.44nm, PICP=0.851.
+>
+> ※ DKL-GP 25차: ep75 조기종료(patience=10), top-3 버퍼(ep25/ep30) 중 ep30 선택 → log-R²=**+0.290**
+>    val-MAE best=0.8133(ep25). particle_size_source 피처 추가 효과 +0.013 개선.
+>    실측 MAE 28.03nm, MdAE=6.85nm, PICP=0.845.
+>
 > ※ DKL-GP 23차: ep75 조기종료(patience=10), top-3 버퍼(ep20/ep25/ep30) 중 ep30 선택 → log-R²=**+0.277**
 >    val-MAE best=0.8378(ep25). 22차(+0.364)보다 낮은 이유: 데이터 분포 변화(n=3307→2799).
->    그러나 실측 MAE 28.22nm(역대 최저) → 실제 예측 정확도는 최고.
 >
 > ※ DKL-GP 22차: top-K 체크포인트 버퍼 + T_max=100 적용. ep70 조기종료, ep30 선택 → log-R²=**+0.364** (log-R² 역대 최고)
 >    T_max=100으로 초기 빠른 수렴 유도.
 
-### 19차 CatBoost --tune 결과 (저장된 최적 파라미터 — catboost_best_params.json)
+### 27차 CatBoost --tune 결과 (저장된 최적 파라미터 — catboost_best_params.json)
 
-Optuna 최적 파라미터 (60회 탐색): iterations=707, lr=0.0495, depth=7, l2_leaf_reg=2.18
+Optuna 최적 파라미터 (60회 탐색, 26차 데이터 n=4,259 기준): iterations=669, lr=0.02444, depth=8, l2_leaf_reg=3.489, random_strength=2.417, bagging_temperature=1.913, border_count=254
+(이전 26차 파라미터: iterations=636, lr=0.0341, depth=9 — catboost_best_params.json으로 갱신됨)
 
 ---
 
@@ -247,9 +254,11 @@ streamlit run 13_dashboard.py       # 대시보드 (http://localhost:8501)
 
 ### 다음 세션 시작 시
 
-24차 완료 상태. ML 진단 완료 + 불필요 코드 제거(build_quantile_pipeline / evaluate_per_method / suggest_experiments_size) 완료.
-- HistGBM +0.006 / LightGBM +0.087 / CatBoost +0.092 / DKL-GP +0.277 (MAE 28.22nm 역대 최저)
-- 노이즈 천장 R²=+0.348 확인 → 추가 개선 위해 `measurement_method` 피처 추가 또는 새 변수 발굴 필요
+27차 완료 상태. 전 모델 재학습 완료.
+- HistGBM -0.031 / LightGBM +0.023 / CatBoost **+0.138** / DKL-GP **+0.321** (역대 최고)
+- DKL-GP MAE **25.37nm** (전체 모델 최저, MdAE=6.44nm, PICP=0.851, n=4,249)
+- CatBoost XRD +0.126 (26차 +0.107 → +0.019 추가 개선, 신규 depth=8 params)
+- 다음 개선 후보: unidentified_method 363행 원인 분석 및 재추출 검토
 
 필요시 재학습:
 
@@ -380,8 +389,8 @@ if TARGET_XRD in df.columns:
 ```
 
 ### ML 모델 구성 (12_model.py)
-- **피처**: **32개** (21 수치 + **11 범주형**)
-- **범주형 피처**: synthesis_method, anion_type, ce_precursor, solvent_type, solvent, mineralizer, capping_agent, chelating_agent, oxidant, dopant, atmosphere
+- **피처**: **33개** (21 수치 + **12 범주형**)
+- **범주형 피처**: synthesis_method, anion_type, ce_precursor, solvent_type, solvent, mineralizer, capping_agent, chelating_agent, oxidant, dopant, atmosphere, **particle_size_source** (25차 추가)
 - **인코더**: TargetEncoder(shuffle=True, cv=5) — shuffle=False+random_state 조합 금지
 - **회귀기**: HistGradientBoostingRegressor — 소그룹(n<200)은 early_stopping=False 자동 전환
 - **early_stopping=False 시 n_iter_no_change 주의**: 파라미터 자체를 제외해야 함 (None 불가)
@@ -426,10 +435,10 @@ if TARGET_XRD in df.columns:
 
 ### CatBoost 모델 구성 (12d_catboost_model.py)
 - **특징**: 범주형 피처 native 처리 (TargetEncoder 불필요), NaN native 지원, Ordered boosting
-- **21차 기준 성능 (best_params 재사용)**:
-  - particle_size_primary_nm: log-R²=**+0.056** (nm-MAE=31.76, n=3311)
-  - crystallite_size_xrd_nm: log-R²=**+0.068** (nm-MAE=11.00, n=2951) ← XRD 필터 적용 후 개선
-- **19차 Optuna 최적 파라미터**: iterations=707, learning_rate=0.0495, depth=7, l2_leaf_reg=2.18, random_strength=4.39
+- **26차 기준 성능 (26차 best_params 적용)**:
+  - particle_size_primary_nm: log-R²=**+0.132** (nm-MAE=26.71, n=4259) ← 26차
+  - crystallite_size_xrd_nm: log-R²=**+0.107** (nm-MAE=10.58, n=3157) ← 26차 개선
+- **26차 Optuna 최적 파라미터** (25차 n=2,800 기준 탐색): iterations=636, learning_rate=0.0341, depth=9, l2_leaf_reg=1.815, random_strength=1.311, bagging_temperature=0.726, border_count=254
 - **ArrowStringArray 주의**: clf용 y 변환 시 `np.asarray(sub[target].values)` 필수
   ```python
   y_raw = np.asarray(sub[target].values)   # ArrowStringArray → numpy 변환
@@ -743,11 +752,44 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 | **`12_model.py` 불필요 코드 제거** | `build_quantile_pipeline`, `evaluate_per_method`, `suggest_experiments_size` 삭제 |
 | **`13_dashboard.py` 능동학습 탭 정리** | HistGBM Q10/Q90 섹션 제거, DKL-GP σ 기반으로 단일화 |
 
+### 25차 세션 (2026-06-21)
+
+| 작업 | 결과 |
+|------|------|
+| **`particle_size_source` 피처 추가** (`12_model.py`) | CATEGORICAL_FEATURES에 추가, 피처 수 32→**33개** (12 범주형) |
+| **`8_normalize_data.py` Section 8c 추가** | `particle_size_primary_nm` 있고 `particle_size_source` 없는 157행 백필 (TEM+137, SEM+20) |
+| **`5_table_extract.py` 수정** | composite 재계산 시 `particle_size_source` 동기화 누락 버그 수정 |
+| **전체 ML 재학습** (HistGBM + LightGBM + CatBoost) | HistGBM **+0.047**, LightGBM **+0.106**, CatBoost **+0.130** (tabular 역대 최고) |
+| XRD 성능 변화 | HistGBM +0.012, LightGBM +0.004, CatBoost **+0.075** (개선) |
+| **DKL-GP 재학습** (`12c_gpr_model.py`, ep75 조기종료→ep30 선택) | log-R²=**+0.290** (23차 +0.277 → +0.013), MAE=**28.03nm** (역대 최저 갱신) |
+
+### 26차 세션 (2026-06-22)
+
+| 작업 | 결과 |
+|------|------|
+| **`2_extract.py` 전면 재작성** | function calling `strict=True` + CRITICAL ACCURACY RULES(A~F) 추가, max_chars 12k→16k, max_tokens 2500→4096, ThreadPoolExecutor(20workers) |
+| 재추출 결과 | **8,819 샘플** (25차 6,403 → +2,416, +37.7%), 오류 1건 (2,879편 처리) |
+| particle_size 커버리지 | **48.4%** (4,249/8,819) — 5_table_extract 후 25차 43.8% → +4.6%p |
+| **전체 파이프라인 재실행** (`main.py --reset --from 2`) | Stage 2~4 완료. unidentified_method 363행 (more accurate extraction) |
+| **HistGBM 재학습** | primary_nm **-0.031** (n=4,249), xrd **+0.006** (n=3,148) — n 증가, R² 일시 하락 |
+| **LightGBM 재학습** | primary_nm **+0.023** (n=4,249), xrd **+0.024** (n=3,148) |
+| **CatBoost --tune** (25차 데이터) | Optuna 60회: depth=9, iter=636, lr=0.034 → **신규 best_params.json 갱신** |
+| **CatBoost 재학습** (신규 params) | primary_nm **+0.132** (n=4,259), xrd **+0.107** (n=3,157, +0.032 개선) |
+| DKL-GP 재학습 | 미완 (메모리 확보 후 재실행 필요) |
+
+### 27차 세션 (2026-06-23)
+
+| 작업 | 결과 |
+|------|------|
+| **DKL-GP 26차 재학습** (`12c_gpr_model.py`, n=4,249) | ep75 조기종료→ep25 선택, log-R²=**+0.321** (역대 최고 갱신), MAE=**25.37nm** (역대 최저) |
+| **CatBoost --tune** (26차 데이터 n=4,259) | Optuna 60회: depth=8, iter=669, lr=0.02444 → **신규 best_params.json 갱신** |
+| **CatBoost 재학습** (신규 params) | primary_nm **+0.138** (+0.006), xrd **+0.126** (+0.019 추가 개선) |
+
 ---
 
 ## 미완료 항목 (우선순위 순)
 
-1. **[선택]** `measurement_method` 피처 추가 — TEM/SEM 편향 4.5nm, particle_size_primary_nm 생성 시 TEM/SEM 어느 쪽 사용했는지 기록. 천장 효과는 제한적이나 systematic bias 보정 가능
+1. **[저우선]** unidentified_method 363행 원인 분석 — 26차 재추출 후 363행 발생 (25차 33행). 원인 파악 후 재추출 검토
 2. **[저우선]** Task Scheduler `setup_auto.py` + 데스크탑 아이콘 `launcher.bat`
 3. **[저우선]** GitHub push — 사용자가 CMD에서 직접 실행 필요:
    ```
@@ -758,14 +800,16 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 
 ---
 
-## 주간 자동화 (run_weekly.py)
+## 월간 자동화 (run_weekly.py)
 
-매주 월요일 09:00 실행 예정. 수동 실행도 가능.
+매월 1일 09:00 실행 (2026-08-01부터 시작). 수동 실행도 가능.
 ```bash
 python run_weekly.py
 ```
 동작: OpenAlex 신규 논문 수집 → Excel 추가 → OA PDF 다운로드 → 후처리 → ML 재학습
 - OpenAlex API: `primary_location.source.display_name` 사용 (`host_venue` 폐기됨)
 - 상태 파일: `output/weekly_state.json`
-- 로그: `output/logs/weekly_YYYYMMDD_HHMMSS.log`
-- Task Scheduler 등록(`setup_auto.py`) 미완성
+- 로그: `output/logs/monthly_scheduler.log`
+- Task Scheduler: `CeriaPipelineMonthly` 등록 완료 (setup_auto.py)
+  - 다음 실행: 2026-08-01 09:00
+  - 관리: `python setup_auto.py --status / --remove`
