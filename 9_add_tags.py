@@ -91,10 +91,12 @@ def main():
                     if s not in ("합성조건", "Sheet1")}
     xl_existing.close()
 
-    with pd.ExcelWriter(EXCEL_PATH, engine="openpyxl") as writer:
+    _tmp_path = EXCEL_PATH + "_tmp.xlsx"
+    with pd.ExcelWriter(_tmp_path, engine="openpyxl") as writer:
         df.to_excel(writer, sheet_name="합성조건", index=False)
         for sname, sdf in other_sheets.items():
             sdf.to_excel(writer, sheet_name=sname, index=False)
+    os.replace(_tmp_path, EXCEL_PATH)
     print(f"\n저장 완료: {EXCEL_PATH}")
 
     print("\n[태그 분포 — tagged_methods]")

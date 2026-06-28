@@ -220,10 +220,12 @@ _sheets = {s: _xl.parse(s) for s in _xl.sheet_names
            if s not in ("합성조건", "Sheet1")}
 _xl.close()
 
-with pd.ExcelWriter(_PATH, engine="openpyxl") as _w:
+_TMP = _PATH + "_tmp.xlsx"
+with pd.ExcelWriter(_TMP, engine="openpyxl") as _w:
     df19.to_excel(_w, sheet_name="합성조건", index=False)
     for _sn, _sd in _sheets.items():
         _sd.to_excel(_w, sheet_name=_sn, index=False)
+os.replace(_TMP, _PATH)
 
 print(f"\n저장 완료: {_PATH}")
 print(f"\n── 최종 채움률 ─────────────────────────────────────────")

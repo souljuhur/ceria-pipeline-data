@@ -49,7 +49,7 @@ ceria_pipeline_data/
 │  ── [Stage 2] 데이터 추출 ──────────────────────────────────────────
 ├── 2_extract.py         GPT-4o-mini 합성조건 추출
 ├── 3_merge.py           샘플CSV + 논문Excel 병합
-├── 4_extract_targeted.py  핵심 13필드 집중 재추출 (병렬 20workers, 19차 8→13)
+├── 4_extract_targeted.py  핵심 15필드 집중 재추출 (병렬 20workers, 29차 13→15)
 ├── 5_table_extract.py   PDF 표/그림 기반 입자크기 보완 (vision GPT)
 │
 │  ── [Stage 3] 후처리 + 출력 ────────────────────────────────────────
@@ -106,7 +106,7 @@ ceria_pipeline_data/
 │   ├── ceria_dataset_full.jsonl
 │   ├── ceria_dataset_quality.jsonl
 │   ├── pipeline_state.json                   체크포인트 상태
-│   ├── llm_cache.json                        2_extract.py 추출 캐시
+│   ├── sample_extraction_cache.json          2_extract.py 추출 캐시
 │   ├── targeted_extraction_cache.json        4_extract_targeted.py 캐시
 │   ├── noa_download_cache.json               1_download.py 캐시
 │   ├── table_extraction_cache.json           5_table_extract.py 캐시
@@ -137,7 +137,7 @@ ceria_pipeline_data/
 
 ---
 
-## 현재 진행 상황 (2026-06-24 기준 — 28차 세션 완료)
+## 현재 진행 상황 (2026-06-29 기준 — 29차 세션 완료)
 
 > ⚠️ **논문 수집 중단**: 0_collect.py, 0_merge_new.py, run_weekly.py — 별도 지시 전까지 실행 금지
 
@@ -149,43 +149,51 @@ ceria_pipeline_data/
 | GPT 추출 완료 | **2,879편** (26차 2_extract.py 전면 재작성 후) |
 | 추출 샘플 수 | **8,819행** (26차 재추출 — 25차 6,403 → +2,416) |
 | 1차 입자크기 커버리지 (TEM+SEM) | **48.4%** (4,249/8,819 valid rows) ← 26차 |
-| crystallite_size_xrd_nm 샘플 수 | **n=3,148** (26차, 25차 n=2,490 → +658) |
+| crystallite_size_xrd_nm 샘플 수 | **n=3,421** (29차 재추출 후 — 27차 3,148 → +273) |
 | ML 모델 피처 수 | **33개** (21 수치 + **12 범주형**) |
-| ML 모델 R² (primary_nm, HistGBM) | **-0.031** (MAE=28.37nm, n=4249) ← **26차** |
-| ML 모델 R² (primary_nm, LightGBM) | **+0.023** (MAE=28.15nm, n=4249) ← **26차** |
-| ML 모델 R² (primary_nm, CatBoost) | **+0.138** (MAE=26.64nm, n=4259) ← **27차 tabular 최고** |
-| ML 모델 R² (primary_nm, DKL-GP) | **+0.321** (MAE=25.37nm, PICP=0.851, n=4249) ← **27차 전체 최고** |
-| ML 모델 R² (xrd_nm, HistGBM) | **+0.006** (MAE=11.03nm, n=3148) ← **26차** |
-| ML 모델 R² (xrd_nm, LightGBM) | **+0.024** (MAE=11.08nm, n=3148) ← **26차** |
-| ML 모델 R² (xrd_nm, CatBoost) | **+0.126** (MAE=10.51nm, n=3157) ← **27차** |
+| ML 모델 R² (primary_nm, HistGBM) | **-0.063** (MAE=28.70nm, n=4249) ← **29차** |
+| ML 모델 R² (primary_nm, LightGBM) | **+0.013** (MAE=28.41nm, n=4249) ← **29차** |
+| ML 모델 R² (primary_nm, CatBoost) | **+0.123** (MAE=26.69nm, n=4259) ← **29차** |
+| ML 모델 R² (primary_nm, DKL-GP) | **+0.053** (MAE=24.68nm, PICP=0.814, n=4249) ← **29차** |
+| ML 모델 R² (xrd_nm, HistGBM) | **+0.002** (MAE=10.76nm, n=3421) ← **29차** |
+| ML 모델 R² (xrd_nm, LightGBM) | **+0.077** (MAE=10.50nm, n=3421) ← **29차** |
+| ML 모델 R² (xrd_nm, CatBoost) | **+0.062** (MAE=10.49nm, n=3430) ← **29차** |
 | unidentified_method 행 수 | **286행** (28차 Section 1c 77행 복구 — 26차 363행) |
 | ce_precursor Non-Ce 정제 | **214행 NULL 처리** (28차 Section 1d — 도펀트·식물추출물 등 오분류 제거) |
-| 추출 필드 수 | **13개** (function calling strict=True 전환 완료) |
+| 추출 필드 수 | **15개** (29차: synthesis_time_h·morphology 추가) |
 | Excel 열 수 | **48열** (11_format_excel.py 기준) |
 
-### 최신 모델 성능 비교 (27차 기준, particle_size_primary_nm)
+### 최신 모델 성능 비교 (29차 기준, particle_size_primary_nm)
 
-| 모델 | log-R² | nm-MAE | RMSE | MdAE | n | vs 26차 |
+| 모델 | log-R² | nm-MAE | RMSE | MdAE | n | vs 27차 |
 |------|--------|--------|------|------|---|---------|
-| HistGBM | **-0.031** | 28.37 | 66.08 | 9.26 | 4249 | 동일 |
-| LightGBM (12b) | **+0.023** | 28.15 | 65.48 | 8.92 | 4249 | 동일 |
-| CatBoost | **+0.138** | **26.64** | 65.89 | 7.95 | 4259 | +0.006 (신규 params) |
-| DKL-GP (inducing=512) | **+0.321** | **25.37** | 66.71 | 6.44 | 4249 | +0.031 (n +1,450) |
+| HistGBM | **-0.063** | 28.70 | 66.87 | 9.32 | 4249 | -0.032 |
+| LightGBM (12b) | **+0.013** | 28.41 | 66.37 | 9.24 | 4249 | -0.010 |
+| CatBoost | **+0.123** | **26.69** | 65.86 | 8.25 | 4259 | -0.015 |
+| DKL-GP (inducing=512) | **+0.053** | **24.68** | 65.10 | 8.12 | 4249 | -0.268 |
 
-> **27차**: DKL-GP 26차 재학습 완료 (n=4,249, ep75 조기종료→ep25 선택). log-R² +0.321 (역대 최고 갱신),
+> **29차**: `4_extract_targeted.py --reset` 재추출 (2,547편, 8분) — morphology +150행, synthesis_time_h +50행,
+> crystallite_size_xrd_nm +273행(3,148→3,421). 전 모델 재학습 + CatBoost --tune (60회).
+> 성능이 27차 대비 전반적 하락: ce_precursor 정제(214행 NULL) 및 데이터 분포 변화가 원인으로 추정.
+> DKL-GP val-MAE=0.8560(ep20)으로 val 기준은 개선됐으나 log-R²는 +0.053으로 큰 폭 하락.
+
+> **27차**: DKL-GP 26차 재학습 완료 (n=4,249, ep75 조기종료→ep25 선택). log-R² **+0.321 (역대 최고)**,
 > MAE **25.37nm (전체 모델 최저)**. CatBoost --tune 26차 데이터 재탐색 → depth=8 신규 best_params,
 > log-R²=+0.138로 소폭 개선.
 
-### 27차 crystallite_size_xrd_nm 성능
+### 29차 crystallite_size_xrd_nm 성능
 
-| 모델 | 25차 | 26차 | 27차 | n | 비고 |
-|------|------|------|------|---|------|
-| HistGBM | +0.012 | +0.006 | **+0.006** | 3,148 | 동일 |
-| LightGBM | +0.004 | +0.024 | **+0.024** | 3,148 | 동일 |
-| CatBoost | +0.075 | +0.107 | **+0.126** | 3,157 | **+0.019 추가 개선** (신규 params) |
+| 모델 | 27차 | 29차 | n | 비고 |
+|------|------|------|---|------|
+| HistGBM | +0.006 | **+0.002** | 3,421 | n +273 |
+| LightGBM | +0.024 | **+0.077** | 3,421 | **+0.053 개선** |
+| CatBoost | +0.126 | **+0.062** | 3,430 | -0.064 하락 |
 
 > **XRD 노이즈 필터 효과** (21차 기준): `12_model.py`에 `between(2, 150)` 필터 → 26차 72건 제거
 > 물리적 근거: Scherrer equation 유효 범위 2~150nm (< 2nm 불가, > 150nm Scherrer 한계 초과)
+
+> ※ DKL-GP 29차: ep70 조기종료(patience=10), top-3 버퍼 중 ep25 선택 → log-R²=**+0.053**
+>    val-MAE best=0.8560(ep20). 27차 대비 큰 폭 하락 — ce_precursor 정제 후 데이터 분포 변화 추정.
 
 > ※ DKL-GP 27차: ep75 조기종료(patience=10), top-3 버퍼 중 ep25 선택 → log-R²=**+0.321** (log-R² 역대 최고 갱신)
 >    val-MAE best=0.8657(ep25). n=4,249 (26차 +1,450행 효과). 실측 MAE **25.37nm(역대 최저)**, MdAE=6.44nm, PICP=0.851.
@@ -200,10 +208,11 @@ ceria_pipeline_data/
 > ※ DKL-GP 22차: top-K 체크포인트 버퍼 + T_max=100 적용. ep70 조기종료, ep30 선택 → log-R²=**+0.364** (log-R² 역대 최고)
 >    T_max=100으로 초기 빠른 수렴 유도.
 
-### 27차 CatBoost --tune 결과 (저장된 최적 파라미터 — catboost_best_params.json)
+### 29차 CatBoost --tune 결과 (저장된 최적 파라미터 — catboost_best_params.json)
 
-Optuna 최적 파라미터 (60회 탐색, 26차 데이터 n=4,259 기준): iterations=669, lr=0.02444, depth=8, l2_leaf_reg=3.489, random_strength=2.417, bagging_temperature=1.913, border_count=254
-(이전 26차 파라미터: iterations=636, lr=0.0341, depth=9 — catboost_best_params.json으로 갱신됨)
+Optuna 최적 파라미터 (60회 탐색, 29차 데이터 n=4,259 기준): iterations=295, lr=0.06900, depth=9
+(이전 27차 파라미터: iterations=669, lr=0.02444, depth=8 — catboost_best_params.json으로 갱신됨)
+> 파라미터가 크게 달라진 이유: ce_precursor 정제 후 데이터 분포 변화로 최적점 이동.
 
 ---
 
@@ -237,7 +246,7 @@ python main.py --reset --stage 3  # 3단계만 강제 재실행
 python 1_download.py                # PDF 다운로드 (--scihub, --dry-run)
 python 2_extract.py                 # GPT 합성조건 추출
 python 3_merge.py                   # 샘플 병합
-python 4_extract_targeted.py        # 핵심 13필드 재추출 (--reset, --dry-run)
+python 4_extract_targeted.py        # 핵심 15필드 재추출 (--reset, --dry-run)
 python 5_table_extract.py           # 표/그림 입자크기 보완
 python 6_fill_keywords.py           # 키워드 보완
 python 7_calc_completeness.py       # 완성도 점수
@@ -255,13 +264,14 @@ streamlit run 13_dashboard.py       # 대시보드 (http://localhost:8501)
 
 ### 다음 세션 시작 시
 
-28차 완료 상태. 전 모델 재학습 완료.
-- HistGBM -0.031 / LightGBM +0.023 / CatBoost **+0.138** / DKL-GP **+0.321** (역대 최고)
-- DKL-GP MAE **25.37nm** (전체 모델 최저, MdAE=6.44nm, PICP=0.851, n=4,249)
-- CatBoost XRD +0.126 (신규 depth=8 params, 27차 최고)
-- ce_precursor 품질 정제 완료: Non-Ce 214행 NULL (Section 1d), unidentified_method 286행
-- GitHub 커밋 완료 (e28b5c6b). push만 남음 — CMD에서 `git push origin main` 실행 필요
-- 다음 개선 후보: `4_extract_targeted.py --reset` (~$2, ~32분) 재추출로 ce_precursor 근본 개선
+29차 완료 상태. 전 모델 재학습 + CatBoost --tune 완료.
+- HistGBM -0.063 / LightGBM +0.013 / CatBoost **+0.123** / DKL-GP **+0.053**
+- DKL-GP MAE **24.68nm** (val, PICP=0.814, n=4,249) — log-R²는 27차 +0.321에서 하락
+- CatBoost XRD +0.062, LightGBM XRD **+0.077** (개선)
+- crystallite_size_xrd_nm n=3,421 (27차 3,148→+273, 재추출 효과)
+- 버그 수정: `7_calc_completeness.py`, `9_add_tags.py` .tmp→_tmp.xlsx (ExcelWriter 확장자 오류)
+- GitHub 커밋 필요 — CMD에서 `git push origin main` 실행 필요
+- 성능 하락 원인: 28차 ce_precursor 정제(214행 NULL) 후 데이터 분포 변화, 더 어려운 샘플이 노출됨
 
 필요시 재학습:
 
@@ -530,7 +540,7 @@ python 4_extract_targeted.py --dry-run   # 대상 확인
 python 4_extract_targeted.py             # 실제 추출 (기본 20 workers)
 python 4_extract_targeted.py --reset     # 캐시 초기화 후 재시도 (~$2, ~32분)
 ```
-- **추출 필드 (13개)**: synthesis_method, ce_precursor, solvent, synthesis_temperature_c, ph_synthesis, ce_concentration_M, mineralizer_concentration_M, synthesis_volume_mL, **capping_agent, chelating_agent, atmosphere, calcination_temperature_c, crystallite_size_xrd_nm** (19차 +5)
+- **추출 필드 (15개)**: synthesis_method, ce_precursor, solvent, synthesis_temperature_c, ph_synthesis, ce_concentration_M, mineralizer_concentration_M, synthesis_volume_mL, capping_agent, chelating_agent, atmosphere, calcination_temperature_c, crystallite_size_xrd_nm, **synthesis_time_h, morphology** (29차 +2)
 - **방법 (20차 개선)**: OpenAI **function calling** (`strict=True`, `tool_choice`) — JSON 파싱 불안정성 제거, 수치 타입 보장
   - synthesis_temperature_c = 150 (int, 보장) vs 이전 "150°C" (문자열 혼재)
   - synthesis_method: enum 리스트로 제한 (hallucination 감소)
@@ -565,7 +575,7 @@ text/ 폴더 (5,426편, 74.5%)
     ↓ 2_extract.py (GPT-4o-mini)                                  [완료: 5,415편]
 ceria_samples.jsonl
     ↓ 3_merge.py
-    ↓ 4_extract_targeted.py (13필드 재추출, 20workers)          [19차 8→13필드]
+    ↓ 4_extract_targeted.py (15필드 재추출, 20workers)          [29차 13→15필드]
     ↓ 5_table_extract.py  [표/PDF 기반 입자크기 보완]
 ceria_samples_merged.csv (8,185행)
     ↓ 6_fill_keywords.py → 7_calc_completeness.py → 8_normalize_data.py
@@ -594,6 +604,8 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 
 | 세션 | 파일 | 버그 | 수정 |
 |------|------|------|------|
+| 29차 | **7_calc_completeness.py** | `_TMP = _PATH + ".tmp"` — pandas ExcelWriter가 `.tmp` 확장자를 유효하지 않은 엔진으로 인식 (`ValueError: Invalid extension`) | `_TMP = _PATH + "_tmp.xlsx"` 로 변경 |
+| 29차 | **9_add_tags.py** | 동일 — `_tmp_path = EXCEL_PATH + ".tmp"` | `_tmp_path = EXCEL_PATH + "_tmp.xlsx"` 로 변경 |
 | 28차 | **8_normalize_data.py** | unidentified_method 363행 — targeted cache에 유효 method 있어도 복구 안 됨 (`_is_empty()`가 "other"를 비어있다고 보지 않음) | Section 1c 추가: cache 조회로 77행 복구 (363→286) |
 | 28차 | **8_normalize_data.py** | ce_precursor에 도펀트 전구체·식물추출물 등 비세리아 물질 혼입 (265/8,791 행, ~3%) | Section 1d `_is_ce_compound()` 추가: 214행 NULL 처리 |
 | 28차 | **4_extract_targeted.py** | ce_precursor 프롬프트 불충분 — 도펀트/귀금속/지지체/유기첨가물 제외 명시 없음 | ce_precursor 스키마 설명 강화 (5개 유형 명시 제외) |
@@ -819,25 +831,23 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 | **CatBoost --tune** (26차 데이터 n=4,259) | Optuna 60회: depth=8, iter=669, lr=0.02444 → **신규 best_params.json 갱신** |
 | **CatBoost 재학습** (신규 params) | primary_nm **+0.138** (+0.006), xrd **+0.126** (+0.019 추가 개선) |
 
-### 28차 세션 (2026-06-24)
+### 29차 세션 (2026-06-29)
 
 | 작업 | 결과 |
 |------|------|
-| **unidentified_method 원인 분석** | `4_extract_targeted.py` line 431의 `_is_empty()`가 "other"를 유효값으로 처리 → targeted cache 덮어쓰기 불가 |
-| **`8_normalize_data.py` Section 1c 추가** | unidentified_method 행 중 targeted cache 조회 → **77행 복구** (363→**286행**) |
-| **ce_precursor 오염 분석** | 265/8,791행(~3%)에 도펀트 전구체·식물추출물 등 비세리아 물질 혼입 확인 |
-| **`8_normalize_data.py` Section 1d 추가** | `_is_ce_compound()` 검증: **214행 NULL 처리** (도펀트·귀금속·지지체·유기첨가물) |
-| **`4_extract_targeted.py` 프롬프트 강화** | ce_precursor 스키마: 5개 제외 유형 명시 (도펀트/귀금속/지지체/유기첨가물/식물추출물) |
-| **`setup_auto.py` 신규 작성** | Task Scheduler CeriaPipelineMonthly 등록 (매월 1일 09:00, 2026-08-01~) |
-| **`launcher.bat` 신규 작성** | 6메뉴 인터랙티브 런처 (전체파이프라인/대시보드/ML3종/DKL-GP/상태확인) |
-| **GitHub 커밋** (gitpython 우회) | `git add` index.lock Permission denied → gitpython으로 우회 커밋 (**e28b5c6b**) |
-| **Stage 3 재실행** | `main.py --reset --from 3` → ce_precursor 정제 반영 완료 |
+| **`4_extract_targeted.py --reset` 재추출** | 2,547편, 8.1분 — morphology **+150행**, synthesis_time_h **+50행**, crystallite_size_xrd_nm **+52행** |
+| **버그 수정 2건** | `7_calc_completeness.py`, `9_add_tags.py`: `.tmp` → `_tmp.xlsx` (ExcelWriter 확장자 오류) |
+| **`main.py --reset --from 3` 재실행** | Stage 3~4 완료. crystallite_size_xrd_nm n=3,148→**3,421** (+273) |
+| **HistGBM 재학습** | primary_nm **-0.063** (MAE=28.70, n=4,249) |
+| **LightGBM 재학습** | primary_nm **+0.013**, xrd_nm **+0.077** (개선) |
+| **CatBoost --tune** (60회, ~3시간) | 신규 params: iter=295, lr=0.069, depth=9. primary_nm **+0.123** |
+| **DKL-GP 재학습** | ep70 조기종료→ep25 선택, log-R²=**+0.053** (27차 +0.321 대비 하락) |
 
 ---
 
 ## 미완료 항목 (우선순위 순)
 
-1. **[선택]** `4_extract_targeted.py --reset` 재추출 (~$2, ~32분) — 강화된 프롬프트로 ce_precursor 근본 재정제 (현재 필터는 사후 NULL 처리)
+1. **[조사]** DKL-GP log-R² 하락 원인 규명 (+0.321→+0.053) — val-MAE는 개선(0.8657→0.8560)됐으나 R² 대폭 하락. 28차 ce_precursor 정제 후 데이터 분포 변화 또는 train/val DOI 분할 차이 가능성
 2. **[저우선]** GitHub push — CMD에서 직접 실행 필요:
    ```cmd
    cd "d:\머신러닝 교육\ceria_pipeline_data"
