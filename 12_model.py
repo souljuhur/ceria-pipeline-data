@@ -19,7 +19,7 @@ ceria_model.py — Stage 3: 예측·역설계 파이프라인
 
 저장된 모델 불러오기:
   import pickle
-  with open("output/model/model_particle_size_composite_reg.pkl", "rb") as f:
+  with open("output/model/model_particle_size_primary_nm_reg.pkl", "rb") as f:
       model = pickle.load(f)
   pred = model.predict(X_new)
 """
@@ -558,11 +558,17 @@ def evaluate(df: pd.DataFrame, target: str, kind: str,
     except Exception as _e:
         print(f"    모델 저장 실패: {_e}")
 
-    # 피처 중요도
+    # 피처 중요도 — 첫 번째 fold val set 기준 (train data 사용 시 중요도 과대 추정 방지)
     scoring = "f1_macro" if kind == "clf" else "neg_mean_absolute_error"
     try:
+        _imp_tr, _imp_val = next(GroupKFold(n_splits=n_splits).split(X, y, groups))
+        _imp_est = build_pipeline(kind)
+        _y_tr = y[_imp_tr] if isinstance(y, np.ndarray) else y.iloc[_imp_tr]
+        _y_val = y[_imp_val] if isinstance(y, np.ndarray) else y.iloc[_imp_val]
+        _imp_est.fit(X.iloc[_imp_tr], _y_tr)
         imp = permutation_importance(
-            est, X, y, n_repeats=8, random_state=42, scoring=scoring, n_jobs=-1
+            _imp_est, X.iloc[_imp_val], _y_val,
+            n_repeats=8, random_state=42, scoring=scoring, n_jobs=-1
         )
         importance = pd.Series(imp.importances_mean, index=FEATURES).sort_values(ascending=False)
         print(f"    상위 피처: {importance.head(5).to_dict()}")

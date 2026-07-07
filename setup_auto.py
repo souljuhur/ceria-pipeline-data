@@ -16,7 +16,12 @@ import argparse
 
 TASK_NAME   = "CeriaPipelineMonthly"
 BASE_DIR    = r"d:\머신러닝 교육\ceria_pipeline_data"
-PYTHON_EXE  = r"C:\Users\K10756\AppData\Local\anaconda3\envs\test\python.exe"
+PYTHON_EXE  = sys.executable
+if r"envs\test" not in PYTHON_EXE and "envs/test" not in PYTHON_EXE:
+    raise SystemExit(
+        f"잘못된 Python 환경: {PYTHON_EXE}\n"
+        "'conda activate test' 후 다시 실행하세요."
+    )
 SCRIPT      = os.path.join(BASE_DIR, "run_weekly.py")
 LOG_DIR     = os.path.join(BASE_DIR, "output", "logs")
 

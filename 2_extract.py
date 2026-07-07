@@ -17,7 +17,7 @@ CMD:
   python 2_extract.py --workers 10     # 동시 처리 수 조정
 """
 
-import os, json, re, time, argparse, csv, threading
+import os, sys, json, re, time, argparse, csv, threading
 import pandas as pd
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -63,10 +63,10 @@ ap.add_argument("--model",   default="gpt-4o-mini",
                 help="OpenAI 모델 (기본: gpt-4o-mini / 고정밀: gpt-4o)")
 ap.add_argument("--workers", type=int, default=20,
                 help="병렬 처리 worker 수 (기본: 20)")
-args = ap.parse_args()
+args = ap.parse_args() if __name__ == "__main__" else ap.parse_args([])
 
 # ── OpenAI 초기화 ─────────────────────────────────────────────────────────────
-if not args.dry_run:
+if __name__ == "__main__" and not args.dry_run:
     if not OPENAI_API_KEY:
         raise SystemExit("OPENAI_API_KEY가 .env에 없습니다.")
     try:
@@ -546,68 +546,73 @@ def _load_xlsx_safe(path):
             return pd.read_excel(path, sheet_name=0, header=idx)
     return pd.read_excel(path, sheet_name=0)
 
-# ── 캐시 로드 ─────────────────────────────────────────────────────────────────
-if args.reset:
-    for p in [CACHE_PATH, OUT_JSONL, OUT_CSV]:
-        if os.path.exists(p):
-            os.remove(p)
-    print("캐시 초기화 완료 — 전체 재추출")
+if __name__ == "__main__":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-if os.path.exists(CACHE_PATH) and not args.reset:
-    with open(CACHE_PATH, encoding="utf-8") as f:
-        _cache = json.load(f)
-    done_dois     = set(_cache.get("done_dois", []))
-    total_samples = _cache.get("total_samples", 0)
-    print(f"캐시 로드: {len(done_dois):,}편 완료, 누적 {total_samples:,}개 샘플")
-else:
-    done_dois     = set()
-    total_samples = 0
-    print("캐시 없음 — 처음부터 시작")
+    # ── 캐시 로드 ─────────────────────────────────────────────────────────────
+    if args.reset:
+        for p in [CACHE_PATH, OUT_JSONL, OUT_CSV]:
+            if os.path.exists(p):
+                os.remove(p)
+        print("캐시 초기화 완료 — 전체 재추출")
 
-# 캐시 소실 대비: 기존 CSV에서 이미 처리된 DOI 추가
-if os.path.exists(OUT_CSV) and not args.reset:
-    try:
-        _csv_prev = pd.read_csv(OUT_CSV, usecols=["doi"], dtype=str)
-        _csv_dois = set(_csv_prev["doi"].dropna().str.strip().tolist())
-        added = _csv_dois - done_dois
-        if added:
-            done_dois.update(added)
-            print(f"  CSV 기존 DOI {len(added):,}개 → done_dois 추가 (중복 방지)")
-    except Exception:
-        pass
+    if os.path.exists(CACHE_PATH) and not args.reset:
+        with open(CACHE_PATH, encoding="utf-8") as f:
+            _cache = json.load(f)
+        done_dois     = set(_cache.get("done_dois", []))
+        total_samples = _cache.get("total_samples", 0)
+        print(f"캐시 로드: {len(done_dois):,}편 완료, 누적 {total_samples:,}개 샘플")
+    else:
+        done_dois     = set()
+        total_samples = 0
+        print("캐시 없음 — 처음부터 시작")
 
-# ── Excel 로드 + 대상 선별 ────────────────────────────────────────────────────
-df = _load_xlsx_safe(XLSX_PATH)
-df.columns = [str(c).strip() for c in df.columns]
-print(f"Excel 로드: {len(df):,}편\n")
+    # 캐시 소실 대비: 기존 CSV에서 이미 처리된 DOI 추가
+    if os.path.exists(OUT_CSV) and not args.reset:
+        try:
+            _csv_prev = pd.read_csv(OUT_CSV, usecols=["doi"], dtype=str)
+            _csv_dois = set(_csv_prev["doi"].dropna().str.strip().tolist())
+            added = _csv_dois - done_dois
+            if added:
+                done_dois.update(added)
+                print(f"  CSV 기존 DOI {len(added):,}개 → done_dois 추가 (중복 방지)")
+        except Exception:
+            pass
 
-txt_stems = {
-    os.path.splitext(fn)[0].lower()
-    for fn in os.listdir(TEXT_DIR) if fn.endswith(".txt")
-}
+    # ── Excel 로드 + 대상 선별 ──────────────────────────────────────────────
+    df = _load_xlsx_safe(XLSX_PATH)
+    df.columns = [str(c).strip() for c in df.columns]
+    print(f"Excel 로드: {len(df):,}편\n")
 
-targets = []
-for _, row in df.iterrows():
-    doi  = str(row.get("doi", "") or "").strip()
-    stem = doi_to_stem(doi)
-    if stem and stem in txt_stems and doi not in done_dois:
-        targets.append({
-            "doi":   doi,
-            "stem":  stem,
-            "title": str(row.get("title", "") or ""),
-        })
+    if not os.path.exists(TEXT_DIR):
+        raise SystemExit(f"text/ 폴더가 없습니다: {TEXT_DIR}")
+    txt_stems = {
+        os.path.splitext(fn)[0].lower()
+        for fn in os.listdir(TEXT_DIR) if fn.endswith(".txt")
+    }
 
-if args.limit:
-    targets = targets[: args.limit]
+    targets = []
+    for _, row in df.iterrows():
+        doi  = str(row.get("doi", "") or "").strip()
+        stem = doi_to_stem(doi)
+        if stem and stem in txt_stems and doi not in done_dois:
+            targets.append({
+                "doi":   doi,
+                "stem":  stem,
+                "title": str(row.get("title", "") or ""),
+            })
 
-print(f"처리 대상: {len(targets):,}편 (전문 있고 미완료)")
-cost_per_paper = 0.003 if "gpt-4o" in args.model and "mini" not in args.model else 0.0008
-est_cost = len(targets) * cost_per_paper
-print(f"모델: {args.model}  |  예상 비용: 약 ${est_cost:.2f}  |  workers: {args.workers}\n")
+    if args.limit:
+        targets = targets[: args.limit]
 
-if args.dry_run:
-    print("--dry-run 모드 종료 (API 호출 없음)")
-    raise SystemExit(0)
+    print(f"처리 대상: {len(targets):,}편 (전문 있고 미완료)")
+    cost_per_paper = 0.003 if "gpt-4o" in args.model and "mini" not in args.model else 0.0008
+    est_cost = len(targets) * cost_per_paper
+    print(f"모델: {args.model}  |  예상 비용: 약 ${est_cost:.2f}  |  workers: {args.workers}\n")
+
+    if args.dry_run:
+        print("--dry-run 모드 종료 (API 호출 없음)")
+        raise SystemExit(0)
 
 # ── 단일 논문 추출 함수 (병렬 실행 단위) ────────────────────────────────────
 def _process_one(paper):
@@ -654,108 +659,109 @@ def _process_one(paper):
 
     return doi, None, True
 
-# ── 추출 루프 (병렬) ──────────────────────────────────────────────────────────
-_write_lock   = threading.Lock()
-_done_lock    = threading.Lock()
-new_samples   = 0
-errors        = 0
-processed     = 0
+if __name__ == "__main__":
+    # ── 추출 루프 (병렬) ──────────────────────────────────────────────────────
+    _write_lock   = threading.Lock()
+    _done_lock    = threading.Lock()
+    new_samples   = 0
+    errors        = 0
+    processed     = 0
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-csv_is_new = not os.path.exists(OUT_CSV)
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    csv_is_new = not os.path.exists(OUT_CSV)
 
-with open(OUT_JSONL, "a", encoding="utf-8") as out_f, \
-     open(OUT_CSV,   "a", encoding="utf-8", newline="") as csv_f:
+    with open(OUT_JSONL, "a", encoding="utf-8") as out_f, \
+         open(OUT_CSV,   "a", encoding="utf-8", newline="") as csv_f:
 
-    csv_writer = csv.DictWriter(csv_f, fieldnames=CSV_COLUMNS, extrasaction="ignore")
-    if csv_is_new:
-        csv_writer.writeheader()
+        csv_writer = csv.DictWriter(csv_f, fieldnames=CSV_COLUMNS, extrasaction="ignore")
+        if csv_is_new:
+            csv_writer.writeheader()
 
-    with ThreadPoolExecutor(max_workers=args.workers) as executor:
-        futures = {executor.submit(_process_one, p): p for p in targets}
-        pbar    = tqdm(total=len(targets), desc="샘플 추출")
+        with ThreadPoolExecutor(max_workers=args.workers) as executor:
+            futures = {executor.submit(_process_one, p): p for p in targets}
+            pbar    = tqdm(total=len(targets), desc="샘플 추출")
 
-        for future in as_completed(futures):
-            paper = futures[future]
-            doi   = paper["doi"]
-            title = paper["title"]
+            for future in as_completed(futures):
+                paper = futures[future]
+                doi   = paper["doi"]
+                title = paper["title"]
 
-            try:
-                doi_r, samples, is_error = future.result()
-            except Exception as e:
-                tqdm.write(f"  예외 ({doi[:40]}): {e}")
-                is_error = True
-                samples  = None
+                try:
+                    doi_r, samples, is_error = future.result()
+                except Exception as e:
+                    tqdm.write(f"  예외 ({doi[:40]}): {e}")
+                    is_error = True
+                    samples  = None
 
-            with _done_lock:
-                done_dois.add(doi)
+                with _done_lock:
+                    done_dois.add(doi)
 
-            if is_error:
-                with _write_lock:
-                    errors += 1
-            elif isinstance(samples, list) and samples:
-                # 샘플 수 상한 (8개): 입자크기 있는 샘플 우선
-                if len(samples) > 8:
-                    has_ps = [s for s in samples if isinstance(s, dict) and (
-                        (s.get("characterization") or {}).get("particle_size_tem_nm") or
-                        (s.get("characterization") or {}).get("particle_size_sem_nm") or
-                        (s.get("characterization") or {}).get("crystallite_size_xrd_nm")
-                    )]
-                    no_ps  = [s for s in samples if s not in has_ps]
-                    samples = (has_ps + no_ps)[:8]
+                if is_error:
+                    with _write_lock:
+                        errors += 1
+                elif isinstance(samples, list) and samples:
+                    # 샘플 수 상한 (8개): 입자크기 있는 샘플 우선
+                    if len(samples) > 8:
+                        has_ps = [s for s in samples if isinstance(s, dict) and (
+                            (s.get("characterization") or {}).get("particle_size_tem_nm") or
+                            (s.get("characterization") or {}).get("particle_size_sem_nm") or
+                            (s.get("characterization") or {}).get("crystallite_size_xrd_nm")
+                        )]
+                        no_ps  = [s for s in samples if s not in has_ps]
+                        samples = (has_ps + no_ps)[:8]
 
-                with _write_lock:
-                    for s in samples:
-                        if not isinstance(s, dict):
-                            continue
-                        s    = _validate_sample(s)
-                        mat  = s.get("materials")        or {}
-                        proc = s.get("procedure")        or {}
-                        char = s.get("characterization") or {}
-                        record = {
-                            "doi":   doi,
-                            "title": title,
-                            "sample_id":             s.get("sample_id", "S1"),
-                            "discriminator":         s.get("discriminator", ""),
-                            "confidence":            s.get("confidence", "medium"),
-                            "conditions_evidence":   s.get("conditions_evidence", ""),
-                            "results_evidence":      s.get("results_evidence", ""),
-                            "materials":             mat,
-                            "procedure":             proc,
-                            "characterization":      char,
-                            "synthesis_conditions":  {**mat, **proc},
-                        }
-                        csv_row = {
-                            "doi": doi, "title": title,
-                            "sample_id":           record["sample_id"],
-                            "discriminator":       record["discriminator"],
-                            "confidence":          record["confidence"],
-                            "conditions_evidence": record["conditions_evidence"],
-                            "results_evidence":    record["results_evidence"],
-                            **mat, **proc, **char,
-                        }
-                        csv_writer.writerow(csv_row)
-                        out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
-                        new_samples += 1
+                    with _write_lock:
+                        for s in samples:
+                            if not isinstance(s, dict):
+                                continue
+                            s    = _validate_sample(s)
+                            mat  = s.get("materials")        or {}
+                            proc = s.get("procedure")        or {}
+                            char = s.get("characterization") or {}
+                            record = {
+                                "doi":   doi,
+                                "title": title,
+                                "sample_id":             s.get("sample_id", "S1"),
+                                "discriminator":         s.get("discriminator", ""),
+                                "confidence":            s.get("confidence", "medium"),
+                                "conditions_evidence":   s.get("conditions_evidence", ""),
+                                "results_evidence":      s.get("results_evidence", ""),
+                                "materials":             mat,
+                                "procedure":             proc,
+                                "characterization":      char,
+                                "synthesis_conditions":  {**mat, **proc},
+                            }
+                            csv_row = {
+                                "doi": doi, "title": title,
+                                "sample_id":           record["sample_id"],
+                                "discriminator":       record["discriminator"],
+                                "confidence":          record["confidence"],
+                                "conditions_evidence": record["conditions_evidence"],
+                                "results_evidence":    record["results_evidence"],
+                                **mat, **proc, **char,
+                            }
+                            csv_writer.writerow(csv_row)
+                            out_f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                            new_samples += 1
 
-                    # 주기적 캐시 저장
-                    processed += 1
-                    if processed % SAVE_INTERVAL == 0:
-                        with open(CACHE_PATH, "w", encoding="utf-8") as cf:
-                            json.dump({"done_dois": list(done_dois),
-                                       "total_samples": new_samples}, cf)
-                        out_f.flush()
-                        csv_f.flush()
-                        tqdm.write(f"  [{processed:,}편] 누적 샘플 {new_samples:,}개")
+                        # 주기적 캐시 저장
+                        processed += 1
+                        if processed % SAVE_INTERVAL == 0:
+                            with open(CACHE_PATH, "w", encoding="utf-8") as cf:
+                                json.dump({"done_dois": list(done_dois),
+                                           "total_samples": new_samples}, cf)
+                            out_f.flush()
+                            csv_f.flush()
+                            tqdm.write(f"  [{processed:,}편] 누적 샘플 {new_samples:,}개")
 
-            pbar.update(1)
-        pbar.close()
+                pbar.update(1)
+            pbar.close()
 
-# 최종 캐시 저장
-with open(CACHE_PATH, "w", encoding="utf-8") as cf:
-    json.dump({"done_dois": list(done_dois),
-               "total_samples": new_samples}, cf)
+    # 최종 캐시 저장
+    with open(CACHE_PATH, "w", encoding="utf-8") as cf:
+        json.dump({"done_dois": list(done_dois),
+                   "total_samples": new_samples}, cf)
 
-print(f"\n완료!")
-print(f"  처리: {len(targets):,}편  |  신규 샘플: {new_samples:,}개  |  오류: {errors}건")
-print(f"  출력: {OUT_JSONL}")
+    print(f"\n완료!")
+    print(f"  처리: {len(targets):,}편  |  신규 샘플: {new_samples:,}개  |  오류: {errors}건")
+    print(f"  출력: {OUT_JSONL}")

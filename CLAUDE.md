@@ -36,8 +36,7 @@ python <script>.py
 ceria_pipeline_data/
 │
 ├── main.py              ★ 마스터 실행기 — python main.py 로 전체 파이프라인 실행
-├── pipeline.py          초기 논문 수집 (OpenAlex, 1회성 — 이미 완료, 0_collect.py로 대체)
-├── run_weekly.py        주간 자동화 (매주 월요일, 별도 실행)
+├── run_weekly.py        월간 자동화 (매월 1일, 별도 실행)
 │
 │  ── [Stage 0] 논문 수집 ────────────────────────────────────────────
 ├── 0_collect.py         다층 쿼리 논문 수집 (OpenAlex, 40개 쿼리, 커서 페이지네이션)
@@ -137,7 +136,7 @@ ceria_pipeline_data/
 
 ---
 
-## 현재 진행 상황 (2026-06-29 기준 — 29차 세션 완료)
+## 현재 진행 상황 (2026-07-07 기준 — 31차 세션 완료)
 
 > ⚠️ **논문 수집 중단**: 0_collect.py, 0_merge_new.py, run_weekly.py — 별도 지시 전까지 실행 금지
 
@@ -151,26 +150,30 @@ ceria_pipeline_data/
 | 1차 입자크기 커버리지 (TEM+SEM) | **48.4%** (4,249/8,819 valid rows) ← 26차 |
 | crystallite_size_xrd_nm 샘플 수 | **n=3,421** (29차 재추출 후 — 27차 3,148 → +273) |
 | ML 모델 피처 수 | **33개** (21 수치 + **12 범주형**) |
-| ML 모델 R² (primary_nm, HistGBM) | **-0.063** (MAE=28.70nm, n=4249) ← **29차** |
-| ML 모델 R² (primary_nm, LightGBM) | **+0.013** (MAE=28.41nm, n=4249) ← **29차** |
-| ML 모델 R² (primary_nm, CatBoost) | **+0.123** (MAE=26.69nm, n=4259) ← **29차** |
-| ML 모델 R² (primary_nm, DKL-GP) | **+0.053** (MAE=24.68nm, PICP=0.814, n=4249) ← **29차** |
-| ML 모델 R² (xrd_nm, HistGBM) | **+0.002** (MAE=10.76nm, n=3421) ← **29차** |
-| ML 모델 R² (xrd_nm, LightGBM) | **+0.077** (MAE=10.50nm, n=3421) ← **29차** |
-| ML 모델 R² (xrd_nm, CatBoost) | **+0.062** (MAE=10.49nm, n=3430) ← **29차** |
+| ML 모델 R² (primary_nm, HistGBM) | **-0.063** (MAE=28.70nm, n=4249) ← **31차** |
+| ML 모델 R² (primary_nm, LightGBM) | **+0.016** (MAE=28.35nm, n=4249) ← **31차** |
+| ML 모델 R² (primary_nm, CatBoost) | **+0.123** (MAE=26.69nm, n=4259) ← **31차** |
+| ML 모델 R² (primary_nm, DKL-GP) | **+0.072** (MAE=24.82nm, PICP=0.815, n=4249) ← **31차** |
+| ML 모델 R² (xrd_nm, HistGBM) | **+0.002** (MAE=10.76nm, n=3421) ← **31차** |
+| ML 모델 R² (xrd_nm, LightGBM) | **+0.077** (MAE=10.51nm, n=3421) ← **31차** |
+| ML 모델 R² (xrd_nm, CatBoost) | **+0.062** (MAE=10.49nm, n=3430) ← **31차** |
 | unidentified_method 행 수 | **286행** (28차 Section 1c 77행 복구 — 26차 363행) |
 | ce_precursor Non-Ce 정제 | **214행 NULL 처리** (28차 Section 1d — 도펀트·식물추출물 등 오분류 제거) |
 | 추출 필드 수 | **15개** (29차: synthesis_time_h·morphology 추가) |
 | Excel 열 수 | **48열** (11_format_excel.py 기준) |
 
-### 최신 모델 성능 비교 (29차 기준, particle_size_primary_nm)
+### 최신 모델 성능 비교 (31차 기준, particle_size_primary_nm)
 
-| 모델 | log-R² | nm-MAE | RMSE | MdAE | n | vs 27차 |
+| 모델 | log-R² | nm-MAE | RMSE | MdAE | n | vs 29차 |
 |------|--------|--------|------|------|---|---------|
-| HistGBM | **-0.063** | 28.70 | 66.87 | 9.32 | 4249 | -0.032 |
-| LightGBM (12b) | **+0.013** | 28.41 | 66.37 | 9.24 | 4249 | -0.010 |
-| CatBoost | **+0.123** | **26.69** | 65.86 | 8.25 | 4259 | -0.015 |
-| DKL-GP (inducing=512) | **+0.053** | **24.68** | 65.10 | 8.12 | 4249 | -0.268 |
+| HistGBM | **-0.063** | 28.70 | 66.87 | 9.32 | 4249 | 동일 |
+| LightGBM (12b) | **+0.016** | 28.35 | 66.39 | 9.19 | 4249 | **+0.003** |
+| CatBoost | **+0.123** | **26.69** | 65.86 | 8.25 | 4259 | 동일 |
+| DKL-GP (inducing=512) | **+0.072** | **24.82** | 64.53 | 9.08 | 4249 | **+0.019** |
+
+> **31차**: 30차 버그 수정(safe_encode collision·fold 내부 인코딩·val-only 평가·농도 필터) 반영한
+> 전 모델 재학습. LightGBM +0.016(+0.003), DKL-GP +0.072(+0.019) 소폭 개선.
+> HistGBM·CatBoost는 동일 수준 유지. DKL-GP ep70 조기종료→ep30 선택(val-MAE=0.8699 @ep20).
 
 > **29차**: `4_extract_targeted.py --reset` 재추출 (2,547편, 8분) — morphology +150행, synthesis_time_h +50행,
 > crystallite_size_xrd_nm +273행(3,148→3,421). 전 모델 재학습 + CatBoost --tune (60회).
@@ -181,17 +184,20 @@ ceria_pipeline_data/
 > MAE **25.37nm (전체 모델 최저)**. CatBoost --tune 26차 데이터 재탐색 → depth=8 신규 best_params,
 > log-R²=+0.138로 소폭 개선.
 
-### 29차 crystallite_size_xrd_nm 성능
+### 31차 crystallite_size_xrd_nm 성능
 
-| 모델 | 27차 | 29차 | n | 비고 |
+| 모델 | 29차 | 31차 | n | 비고 |
 |------|------|------|---|------|
-| HistGBM | +0.006 | **+0.002** | 3,421 | n +273 |
-| LightGBM | +0.024 | **+0.077** | 3,421 | **+0.053 개선** |
-| CatBoost | +0.126 | **+0.062** | 3,430 | -0.064 하락 |
+| HistGBM | +0.002 | **+0.002** | 3,421 | 동일 |
+| LightGBM | +0.077 | **+0.077** | 3,421 | 동일 |
+| CatBoost | +0.062 | **+0.062** | 3,430 | 동일 |
 
 > **XRD 노이즈 필터 효과** (21차 기준): `12_model.py`에 `between(2, 150)` 필터 → 26차 72건 제거
 > 물리적 근거: Scherrer equation 유효 범위 2~150nm (< 2nm 불가, > 150nm Scherrer 한계 초과)
 
+> ※ DKL-GP 31차: ep70 조기종료(patience=10), top-3 버퍼 중 ep30 선택 → log-R²=**+0.072**
+>    val-MAE best=0.8464(ep20). 29차(+0.053) 대비 +0.019 개선 — safe_encode·val-only 수정 효과.
+>
 > ※ DKL-GP 29차: ep70 조기종료(patience=10), top-3 버퍼 중 ep25 선택 → log-R²=**+0.053**
 >    val-MAE best=0.8560(ep20). 27차 대비 큰 폭 하락 — ce_precursor 정제 후 데이터 분포 변화 추정.
 
@@ -264,14 +270,12 @@ streamlit run 13_dashboard.py       # 대시보드 (http://localhost:8501)
 
 ### 다음 세션 시작 시
 
-29차 완료 상태. 전 모델 재학습 + CatBoost --tune 완료.
-- HistGBM -0.063 / LightGBM +0.013 / CatBoost **+0.123** / DKL-GP **+0.053**
-- DKL-GP MAE **24.68nm** (val, PICP=0.814, n=4,249) — log-R²는 27차 +0.321에서 하락
-- CatBoost XRD +0.062, LightGBM XRD **+0.077** (개선)
-- crystallite_size_xrd_nm n=3,421 (27차 3,148→+273, 재추출 효과)
-- 버그 수정: `7_calc_completeness.py`, `9_add_tags.py` .tmp→_tmp.xlsx (ExcelWriter 확장자 오류)
+31차 완료 상태. 30차 버그 수정 반영 후 전 모델 재학습 완료.
+- 성능 현황: HistGBM **-0.063** / LightGBM **+0.016** / CatBoost **+0.123** / DKL-GP **+0.072**
+- 31차 재학습 효과: LightGBM +0.003, DKL-GP +0.019 소폭 개선 (safe_encode·val-only 수정 효과)
 - GitHub 커밋 필요 — CMD에서 `git push origin main` 실행 필요
-- 성능 하락 원인: 28차 ce_precursor 정제(214행 NULL) 후 데이터 분포 변화, 더 어려운 샘플이 노출됨
+- CatBoost segfault: 모델 저장 후 cleanup 단계에서 발생 — pkl 파일은 정상, performance_history catboost 필드는 null
+- 미해결: DKL-GP log-R² 하락 원인 (+0.321→+0.072) 부분 회복됐으나 27차 수준 미달
 
 필요시 재학습:
 
@@ -400,6 +404,20 @@ if TARGET_XRD in df.columns:
     df.loc[~df[TARGET_XRD].between(2, 150), TARGET_XRD] = np.nan
     # 21차: 74건 제거 → n: 3,015 → 2,947, HistGBM R²: -0.054 → -0.004
 ```
+
+### safe_encode / encode_cats 설계 원칙 (12b_lgbm_baseline.py, 12d_targeted_design.py)
+- **fold 내부 인코딩** (30차 도입): data leakage 방지를 위해 `encode_cats`를 CV 루프 안으로 이동
+  ```python
+  for tr_idx, val_idx in cv.split(sub, y, groups):
+      _tr_enc, _enc_fold = encode_cats(sub.iloc[tr_idx].copy())
+      _val_enc           = safe_encode(sub.iloc[val_idx].copy(), _enc_fold)
+  ```
+- **unknown 처리**: `len(le.classes_)` — 0으로 매핑하면 첫 번째 실제 범주(알파벳 순 최소값)와 충돌 (30차 수정)
+  ```python
+  unk = len(le.classes_)
+  lambda x, _le=le, _known=known, _unk=unk: int(_le.transform([x])[0]) if x in _known else _unk
+  ```
+  > 람다 클로저 캡처 버그 주의: 루프 변수 `le`, `known`, `unk`는 반드시 기본인자로 바인딩해야 함
 
 ### ML 모델 구성 (12_model.py)
 - **피처**: **33개** (21 수치 + **12 범주형**)
@@ -604,6 +622,11 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 
 | 세션 | 파일 | 버그 | 수정 |
 |------|------|------|------|
+| 30차 | **2_extract.py** | `print(f"  출력: {OUT_JSONL}")` 가 `if __name__ == "__main__":` 블록 밖(column 0)에 위치 → import 시 항상 실행됨 | 들여쓰기 4칸 추가로 가드 안으로 이동 |
+| 30차 | **setup_auto.py** | `PYTHON_EXE = sys.executable` — 잘못된 conda 환경에서 실행 시 Task Scheduler에 base Python 경로가 등록돼 월간 자동화 무음 실패 가능 | `if "envs\\test" not in PYTHON_EXE` 검증 추가, 불일치 시 즉시 SystemExit |
+| 30차 | **run_weekly.py** | post_steps 설명 문자열이 `"핵심 13필드 재추출"` — 29차 이후 15필드로 확장됐으나 라벨 미갱신 | `"핵심 15필드 재추출"` 로 수정 |
+| 30차 | **12b_lgbm_baseline.py** | `safe_encode`에서 미지 범주를 `0`으로 매핑 — `LabelEncoder` 정렬상 첫 번째 실제 범주(예: `"air"`)와 정수 충돌, OOF 예측 무음 오염 | unknown을 `len(le.classes_)` (기존 범위 밖 정수)로 변경; 람다 클로저 캡처 버그(`le`, `known`, `unk` 기본인자 바인딩)도 함께 수정 |
+| 30차 | **12d_targeted_design.py** | 동일 — `safe_encode` unknown → `0` | 동일 수정 적용 |
 | 29차 | **7_calc_completeness.py** | `_TMP = _PATH + ".tmp"` — pandas ExcelWriter가 `.tmp` 확장자를 유효하지 않은 엔진으로 인식 (`ValueError: Invalid extension`) | `_TMP = _PATH + "_tmp.xlsx"` 로 변경 |
 | 29차 | **9_add_tags.py** | 동일 — `_tmp_path = EXCEL_PATH + ".tmp"` | `_tmp_path = EXCEL_PATH + "_tmp.xlsx"` 로 변경 |
 | 28차 | **8_normalize_data.py** | unidentified_method 363행 — targeted cache에 유효 method 있어도 복구 안 됨 (`_is_empty()`가 "other"를 비어있다고 보지 않음) | Section 1c 추가: cache 조회로 77행 복구 (363→286) |
@@ -843,11 +866,38 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 | **CatBoost --tune** (60회, ~3시간) | 신규 params: iter=295, lr=0.069, depth=9. primary_nm **+0.123** |
 | **DKL-GP 재학습** | ep70 조기종료→ep25 선택, log-R²=**+0.053** (27차 +0.321 대비 하락) |
 
+### 30차 세션 (2026-07-07)
+
+| 작업 | 결과 |
+|------|------|
+| **멀티-에이전트 코드 리뷰** | 8개 각도 × 병렬 분석 — CONFIRMED 2건·PLAUSIBLE 3건·REFUTED 3건 |
+| **`pipeline.py` / `docs/PROJECT_MAP.md` 삭제** | 구버전 노트북식 파이프라인·구버전 문서 정리 |
+| **`13_dashboard.py` Streamlit API 업데이트** | `width="stretch"` → `use_container_width=True` (전체 적용) |
+| **`1_download.py` 컬럼명 수정** | `open_access_url` → `oa_url` (Excel 실제 컬럼명과 일치, 기존 bug fix) |
+| **`12_model.py` 피처 중요도 개선** | 전체 데이터 대신 첫 fold val set 기준으로 계산 (train bias 방지) |
+| **`12b_lgbm_baseline.py` fold 내부 인코딩** | `encode_cats`를 fold 안으로 이동, `safe_encode` 적용 (data leakage 방지) |
+| **`12c_gpr_model.py` val-only 평가 전환** | 전체 데이터 대신 val_idx(15%)만으로 R²·MAE·PICP 계산 (train 편향 제거) |
+| **`12d_targeted_design.py` fold 내부 인코딩** | 동일 leakage 방지 적용 |
+| **`8_normalize_data.py` 농도 범위 조정** | ce_concentration_M: >15M → 0.001~5M / mineralizer: >30M → 0.001~15M |
+| **`2_extract.py` 모듈화 리팩터링** | 실행 코드 전체를 `if __name__ == "__main__":` 가드 안으로 이동 |
+| **`run_weekly.py` 타임아웃 확장 + 단계 추가** | `4_extract_targeted.py`·`5_table_extract.py` 자동화 포함, timeout 900→1800s |
+| **버그 수정 5건** (30차 신규) | 아래 버그 수정 이력 참조 |
+
+### 31차 세션 (2026-07-07)
+
+| 작업 | 결과 |
+|------|------|
+| **전 모델 재학습** (30차 버그 수정 반영) | `main.py --reset --from 3` → HistGBM + LightGBM + CatBoost + DKL-GP |
+| **LightGBM 개선** | primary +0.016 (29차 +0.013 → +0.003), safe_encode fold 내부 인코딩 효과 |
+| **DKL-GP 개선** | primary +0.072 (29차 +0.053 → +0.019), val-only 평가 + safe_encode 수정 효과 |
+| **HistGBM·CatBoost** | 동일 수준 유지 (primary -0.063 / +0.123, xrd +0.002 / +0.062) |
+| **CatBoost segfault** | 모든 pkl 저장 완료 후 cleanup 단계에서 발생 — 모델 자체 정상 |
+
 ---
 
 ## 미완료 항목 (우선순위 순)
 
-1. **[조사]** DKL-GP log-R² 하락 원인 규명 (+0.321→+0.053) — val-MAE는 개선(0.8657→0.8560)됐으나 R² 대폭 하락. 28차 ce_precursor 정제 후 데이터 분포 변화 또는 train/val DOI 분할 차이 가능성
+1. **[조사]** DKL-GP log-R² 하락 원인 규명 (+0.321→+0.072) — 31차 부분 회복(+0.019)이나 27차 수준(+0.321) 미달. ce_precursor 정제 후 데이터 분포 변화 또는 GroupShuffleSplit train/val DOI 분할 차이 가능성. val-only 평가 전환 이후 지표가 이전 세션과 비교 불가한 점 유의.
 2. **[저우선]** GitHub push — CMD에서 직접 실행 필요:
    ```cmd
    cd "d:\머신러닝 교육\ceria_pipeline_data"

@@ -114,13 +114,14 @@ def encode_cats(df: pd.DataFrame):
 
 
 def safe_encode(df: pd.DataFrame, encoders: dict) -> pd.DataFrame:
-    """미지 범주 → 0 으로 안전 인코딩."""
+    """미지 범주 → len(classes) 로 안전 인코딩 (0과 충돌 방지)."""
     df_enc = df.copy()
     for col in CATEGORICAL_FEATURES:
         le    = encoders[col]
         known = set(le.classes_)
+        unk   = len(le.classes_)
         df_enc[col] = df_enc[col].astype(str).apply(
-            lambda x: int(le.transform([x])[0]) if x in known else 0
+            lambda x, _le=le, _known=known, _unk=unk: int(_le.transform([x])[0]) if x in _known else _unk
         )
     return df_enc
 
@@ -173,10 +174,12 @@ def train_quantile_models(df: pd.DataFrame) -> tuple:
     n_splits  = min(5, n_papers)
     cv        = GroupKFold(n_splits=n_splits)
     oof_log   = np.zeros(n_rows)
-    for tr, val in cv.split(X, y_log, groups):
+    for tr, val in cv.split(sub, y_log, groups):
+        _tr_enc, _enc_f = encode_cats(sub.iloc[tr].copy())
+        _val_enc        = safe_encode(sub.iloc[val].copy(), _enc_f)
         m_cv = lgb.LGBMRegressor(objective="quantile", alpha=0.50, **lgbm_params)
-        m_cv.fit(X.iloc[tr], y_log[tr], categorical_feature=CATEGORICAL_FEATURES)
-        oof_log[val] = m_cv.predict(X.iloc[val])
+        m_cv.fit(_tr_enc[FEATURES], y_log[tr], categorical_feature=CATEGORICAL_FEATURES)
+        oof_log[val] = m_cv.predict(_val_enc[FEATURES])
 
     oof_nm = np.exp(oof_log)
     mae    = mean_absolute_error(y_raw, oof_nm)

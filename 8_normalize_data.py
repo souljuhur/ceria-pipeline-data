@@ -231,14 +231,6 @@ METHOD_MAP = {
     "ion exchange method":                 "ion_exchange",
 }
 
-def _norm_method(val):
-    if pd.isna(val) or not str(val).strip():
-        return val
-    v = str(val).strip().lower()
-    if ";" in v:
-        v = v.split(";")[0].strip()
-    return METHOD_MAP.get(v, val)
-
 def _apply_method_map(series):
     """METHOD_MAP 벡터화 적용"""
     def _f(val):
@@ -931,21 +923,23 @@ if df_csv is not None:
         df_csv.loc[_bad_ph, "ph_synthesis"] = None
         print(f"  [품질] ph_synthesis 범위 이탈(0~14 외) 제거: {cnt_ph:,}건")
 
-    # (5) ce_concentration_M: 물리적 상한 15M
+    # (5) ce_concentration_M: 물리적 범위 0.001~5M
+    # Ce(NO3)3·6H2O 포화도 ~5M, 1mM 미만은 측정 오류 가능성 높음
     if "ce_concentration_M" in df_csv.columns:
         _ce = pd.to_numeric(df_csv["ce_concentration_M"], errors="coerce")
-        _bad_ce = _ce.notna() & (_ce > 15)
+        _bad_ce = _ce.notna() & ((_ce > 5) | (_ce < 0.001))
         cnt_ce = int(_bad_ce.sum())
         df_csv.loc[_bad_ce, "ce_concentration_M"] = None
-        print(f"  [품질] ce_concentration_M >15M 제거: {cnt_ce:,}건")
+        print(f"  [품질] ce_concentration_M 범위 이탈(0.001~5M 외) 제거: {cnt_ce:,}건")
 
-    # (6) mineralizer_concentration_M: 물리적 상한 30M
+    # (6) mineralizer_concentration_M: 물리적 범위 0.001~15M
+    # NaOH 포화도 ~19M이지만 합성에 15M 초과는 극히 드뭄
     if "mineralizer_concentration_M" in df_csv.columns:
         _min = pd.to_numeric(df_csv["mineralizer_concentration_M"], errors="coerce")
-        _bad_min = _min.notna() & (_min > 30)
+        _bad_min = _min.notna() & ((_min > 15) | (_min < 0.001))
         cnt_min = int(_bad_min.sum())
         df_csv.loc[_bad_min, "mineralizer_concentration_M"] = None
-        print(f"  [품질] mineralizer_concentration_M >30M 제거: {cnt_min:,}건")
+        print(f"  [품질] mineralizer_concentration_M 범위 이탈(0.001~15M 외) 제거: {cnt_min:,}건")
 
 # ── 8c. particle_size_source 백필 ─────────────────────────────────────────────
 # 5_table_extract.py가 particle_size_primary_nm을 재계산할 때

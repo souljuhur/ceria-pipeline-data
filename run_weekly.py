@@ -177,8 +177,9 @@ def extract_text(doi: str):
         pass
 
 # ── 스크립트 실행 ────────────────────────────────────────────────────────────
-def run_script(script: str, timeout: int = 900) -> bool:
+def run_script(script: str, timeout: int = 1800) -> bool:
     log.info(f"  → {script} ...")
+    _env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
     try:
         r = subprocess.run(
             [PYTHON, str(BASE / script)],
@@ -188,6 +189,7 @@ def run_script(script: str, timeout: int = 900) -> bool:
             encoding="utf-8",
             errors="replace",
             timeout=timeout,
+            env=_env,
         )
         lines = (r.stdout or "").splitlines()
         # 처음 3줄 + 마지막 3줄 출력 (중간 생략)
@@ -287,19 +289,22 @@ def main():
 
     # ── 4. 후처리 파이프라인 ──────────────────────────────────────────────────
     log.info("\n── 4. 후처리 파이프라인 ─────────────────────────────────────")
+    # (script, desc, timeout_seconds)  — timeout=None → 함수 기본값 사용
     post_steps = [
-        ("3_merge.py",              "샘플 병합"),
-        ("6_fill_keywords.py",      "키워드 보완"),
-        ("7_calc_completeness.py",  "완성도 점수 계산"),
-        ("8_normalize_data.py",     "데이터 정규화"),
-        ("9_add_tags.py",           "OA/방법/형태 태그"),
-        ("10_build_dataset.py",     "JSONL 데이터셋 생성"),
-        ("12_model.py",             "ML 모델 업데이트"),
+        ("3_merge.py",              "샘플 병합",             1800),
+        ("4_extract_targeted.py",   "핵심 15필드 재추출",    3600),
+        ("5_table_extract.py",      "표/그림 입자크기 보완", 3600),
+        ("6_fill_keywords.py",      "키워드 보완",           1800),
+        ("7_calc_completeness.py",  "완성도 점수 계산",      1800),
+        ("8_normalize_data.py",     "데이터 정규화",         1800),
+        ("9_add_tags.py",           "OA/방법/형태 태그",     1800),
+        ("10_build_dataset.py",     "JSONL 데이터셋 생성",   1800),
+        ("12_model.py",             "ML 모델 업데이트",      7200),
     ]
     results = {}
-    for script, desc in post_steps:
+    for script, desc, tmo in post_steps:
         log.info(f"\n  [{desc}]")
-        results[script] = run_script(script)
+        results[script] = run_script(script, timeout=tmo)
 
     # ── 5. 상태 저장 ──────────────────────────────────────────────────────────
     state["last_run"]    = datetime.now().isoformat()

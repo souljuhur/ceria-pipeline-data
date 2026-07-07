@@ -388,6 +388,14 @@ def try_scihub(doi: str) -> str:
     return ""
 
 
+def _load_xlsx(path):
+    raw = pd.read_excel(path, sheet_name=0, header=None, nrows=15)
+    for idx, row in raw.iterrows():
+        if any(str(v).strip().lower() == "doi" for v in row):
+            return pd.read_excel(path, sheet_name=0, header=idx)
+    return pd.read_excel(path, sheet_name=0)
+
+
 # ── 메인 ─────────────────────────────────────────────────────────────────────
 def backfill_pdf():
     """텍스트만 있고 PDF 없는 기존 논문에 PMC PDF 소급 수집.
@@ -397,7 +405,7 @@ def backfill_pdf():
     """
     PDF_DIR.mkdir(exist_ok=True)
 
-    df = pd.read_excel(XLSX, sheet_name=0)
+    df = _load_xlsx(XLSX)
     targets = [
         str(r["doi"]).strip()
         for _, r in df.iterrows()
@@ -504,7 +512,7 @@ def main():
         print(f"  PDF 있는 미추출 논문 없음")
 
     # ── 대상 선정: 텍스트 없는 논문 ─────────────────────────────────────────
-    df = pd.read_excel(XLSX, sheet_name=0)
+    df = _load_xlsx(XLSX)
 
     target_rows = df[
         df["doi"].notna() &
@@ -544,7 +552,7 @@ def main():
 
     targets = [
         (str(r["doi"]).strip(),
-         str(r.get("open_access_url", "") or ""))
+         str(r.get("oa_url", "") or ""))
         for _, r in target_rows.iterrows()
         if str(r["doi"]).strip() not in skip_set
         and not has_text(str(r["doi"]).strip())

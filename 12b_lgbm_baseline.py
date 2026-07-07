@@ -76,13 +76,14 @@ def encode_cats(df: pd.DataFrame):
 
 
 def safe_encode(df: pd.DataFrame, encoders: dict) -> pd.DataFrame:
-    """학습 외 데이터에 대한 안전한 인코딩 (미지 범주 → 0)."""
+    """학습 외 데이터에 대한 안전한 인코딩 (미지 범주 → len(classes), 기존 0과 충돌 방지)."""
     df_enc = df.copy()
     for col in CATEGORICAL_FEATURES:
         le = encoders[col]
         known = set(le.classes_)
+        unk = len(le.classes_)
         df_enc[col] = df_enc[col].astype(str).apply(
-            lambda x: le.transform([x])[0] if x in known else 0
+            lambda x, _le=le, _known=known, _unk=unk: int(_le.transform([x])[0]) if x in _known else _unk
         )
     return df_enc
 
@@ -128,27 +129,27 @@ def evaluate_lgbm(df: pd.DataFrame, target: str, kind: str,
         print(f"  [{target}] 표본 부족 — 스킵")
         return {}
 
-    sub_enc, encoders = encode_cats(sub)
-    X      = sub_enc[FEATURES]
     groups = sub["doi"]
 
     use_log = (kind == "reg" and target in _LOG_TARGETS)
     y_raw   = sub[target].values.copy()
     y       = np.log(y_raw) if use_log else y_raw.copy()
 
-    # GroupKFold 수동 교차검증 (LightGBM cat_feature 파라미터 전달용)
+    # GroupKFold 수동 교차검증 (fold 내부에서 인코딩 — 데이터 누출 방지)
     n_splits = min(5, n_papers)
-    cv      = GroupKFold(n_splits=n_splits)
-    pred_y  = np.zeros(len(sub)) if kind == "reg" else np.empty(len(sub), dtype=object)
+    cv       = GroupKFold(n_splits=n_splits)
+    pred_y   = np.zeros(len(sub)) if kind == "reg" else np.empty(len(sub), dtype=object)
     fold_maes = []
 
-    for fold, (tr_idx, val_idx) in enumerate(cv.split(X, y, groups)):
+    for fold, (tr_idx, val_idx) in enumerate(cv.split(sub, y, groups)):
+        _tr_enc, _enc_fold = encode_cats(sub.iloc[tr_idx].copy())
+        _val_enc           = safe_encode(sub.iloc[val_idx].copy(), _enc_fold)
         m = build_lgbm(kind, params)
         m.fit(
-            X.iloc[tr_idx], y[tr_idx],
+            _tr_enc[FEATURES], y[tr_idx],
             categorical_feature=CATEGORICAL_FEATURES,
         )
-        p = m.predict(X.iloc[val_idx])
+        p = m.predict(_val_enc[FEATURES])
         pred_y[val_idx] = p
         if kind == "clf":
             fold_maes.append((y[val_idx] == p).mean())   # 폴드 정확도
@@ -186,7 +187,9 @@ def evaluate_lgbm(df: pd.DataFrame, target: str, kind: str,
             print(f"  [{target}] MAE={mae:.4f}  RMSE={rmse:.4f}  MdAE={mdae:.4f}  R²={r2:.3f}")
             result = {"r2": r2, "mae": mae, "rmse": rmse, "mdae": mdae}
 
-    # 전체 재학습
+    # 전체 재학습 — 최종 모델은 전체 데이터로 인코딩
+    sub_enc, encoders = encode_cats(sub)
+    X = sub_enc[FEATURES]
     final_model = build_lgbm(kind, params)
     final_model.fit(X, y, categorical_feature=CATEGORICAL_FEATURES)
 
@@ -271,12 +274,10 @@ def tune(df: pd.DataFrame, target: str, kind: str,
         return {}
 
     sub = df.dropna(subset=[target]).copy()
-    sub_enc, encoders = encode_cats(sub)
-    X      = sub_enc[FEATURES]
-    groups = sub["doi"]
+    groups  = sub["doi"]
     use_log = (kind == "reg" and target in _LOG_TARGETS)
-    y_raw  = sub[target].values.copy()
-    y      = np.log(y_raw) if use_log else y_raw
+    y_raw   = sub[target].values.copy()
+    y       = np.log(y_raw) if use_log else y_raw
 
     def objective(trial):
         params = {
@@ -291,11 +292,13 @@ def tune(df: pd.DataFrame, target: str, kind: str,
         }
         cv = GroupKFold(n_splits=min(5, groups.nunique()))
         maes = []
-        for tr, val in cv.split(X, y, groups):
+        for tr, val in cv.split(sub, y, groups):
+            _tr_enc, _enc_f = encode_cats(sub.iloc[tr].copy())
+            _val_enc        = safe_encode(sub.iloc[val].copy(), _enc_f)
             m = build_lgbm(kind, params)
-            m.fit(X.iloc[tr], y[tr],
+            m.fit(_tr_enc[FEATURES], y[tr],
                   categorical_feature=CATEGORICAL_FEATURES)
-            maes.append(mean_absolute_error(y[val], m.predict(X.iloc[val])))
+            maes.append(mean_absolute_error(y[val], m.predict(_val_enc[FEATURES])))
         return np.mean(maes)
 
     study = optuna.create_study(direction="minimize",

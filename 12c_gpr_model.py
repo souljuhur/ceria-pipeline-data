@@ -541,21 +541,27 @@ def main():
         lr=args.lr,
     )
 
-    # 전체 집합 예측 + 불확실성
+    # 전체 집합 예측 — 시각화·능동학습·σ 통계용 (train 포함)
     mean_pred, std_pred = predict(model, likelihood, num_np, cat_np)
+
+    # val set 예측 — 성능 지표용 (train 데이터 누출 방지)
+    val_mean, val_std = predict(model, likelihood, num_np[val_idx], cat_np[val_idx])
+
     if use_log:
         mean_nm  = np.exp(mean_pred)
         std_nm   = np.exp(mean_pred + std_pred) - np.exp(mean_pred)
-        mae_nm   = mean_absolute_error(y_raw, mean_nm)
-        rmse_nm  = np.sqrt(mean_squared_error(y_raw, mean_nm))
-        mdae_nm  = np.median(np.abs(y_raw - mean_nm))
-        r2_nm    = r2_score(y_raw, mean_nm)
-        r2_log   = r2_score(y, mean_pred)
-        # PICP: 90% 예측구간 포함률 (z=1.645 → 명목 90%)
-        lo_nm    = np.exp(mean_pred - 1.645 * std_pred)
-        hi_nm    = np.exp(mean_pred + 1.645 * std_pred)
-        picp_90  = np.mean((y_raw >= lo_nm) & (y_raw <= hi_nm))
-        print(f"\n[전체 평가]  log-R²={r2_log:.3f} | "
+        # 지표: val set만
+        val_nm   = np.exp(val_mean)
+        mae_nm   = mean_absolute_error(y_raw[val_idx], val_nm)
+        rmse_nm  = np.sqrt(mean_squared_error(y_raw[val_idx], val_nm))
+        mdae_nm  = np.median(np.abs(y_raw[val_idx] - val_nm))
+        r2_nm    = r2_score(y_raw[val_idx], val_nm)
+        r2_log   = r2_score(y[val_idx], val_mean)
+        # PICP: 90% 예측구간 포함률 (z=1.645 → 명목 90%), val set 기준
+        lo_nm    = np.exp(val_mean - 1.645 * val_std)
+        hi_nm    = np.exp(val_mean + 1.645 * val_std)
+        picp_90  = np.mean((y_raw[val_idx] >= lo_nm) & (y_raw[val_idx] <= hi_nm))
+        print(f"\n[val 평가 (n={len(val_idx)})]  log-R²={r2_log:.3f} | "
               f"nm-MAE={mae_nm:.2f}  RMSE={rmse_nm:.2f}  MdAE={mdae_nm:.2f}nm"
               f"  nm-R²={r2_nm:.3f}")
         print(f"  불확실성 캘리브레이션: PICP(90%)={picp_90:.3f}"
@@ -563,14 +569,14 @@ def main():
     else:
         mean_nm  = mean_pred
         std_nm   = std_pred
-        mae      = mean_absolute_error(y, mean_pred)
-        rmse     = np.sqrt(mean_squared_error(y, mean_pred))
-        mdae     = np.median(np.abs(y - mean_pred))
-        r2       = r2_score(y, mean_pred)
-        lo       = mean_pred - 1.645 * std_pred
-        hi       = mean_pred + 1.645 * std_pred
-        picp_90  = np.mean((y >= lo) & (y <= hi))
-        print(f"\n[전체 평가]  MAE={mae:.4f}  RMSE={rmse:.4f}  MdAE={mdae:.4f}  R²={r2:.3f}")
+        mae      = mean_absolute_error(y[val_idx], val_mean)
+        rmse     = np.sqrt(mean_squared_error(y[val_idx], val_mean))
+        mdae     = np.median(np.abs(y[val_idx] - val_mean))
+        r2       = r2_score(y[val_idx], val_mean)
+        lo       = val_mean - 1.645 * val_std
+        hi       = val_mean + 1.645 * val_std
+        picp_90  = np.mean((y[val_idx] >= lo) & (y[val_idx] <= hi))
+        print(f"\n[val 평가 (n={len(val_idx)})]  MAE={mae:.4f}  RMSE={rmse:.4f}  MdAE={mdae:.4f}  R²={r2:.3f}")
         print(f"  불확실성 캘리브레이션: PICP(90%)={picp_90:.3f}")
 
     print(f"  불확실성 σ — median={np.median(std_nm):.2f}nm  "

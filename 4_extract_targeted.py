@@ -1,18 +1,20 @@
 """
-4_extract_targeted.py — 13개 핵심 필드 집중 재추출 (합성조건 + 농도 + 부피 + 후처리 + 분석값)
+4_extract_targeted.py — 15개 핵심 필드 집중 재추출 (합성조건 + 농도 + 부피 + 후처리 + 분석값)
 
-대상: ceria_samples_merged.csv 에서 13개 핵심 피처 중 하나라도 비어있는 논문
+대상: ceria_samples_merged.csv 에서 15개 핵심 피처 중 하나라도 비어있는 논문
      (전문 텍스트 파일 보유 필수)
 방법: GPT-4o-mini 포커스 프롬프트 + ThreadPoolExecutor 병렬 처리
-비용 예상: 대상 논문당 ~$0.0010  (총 ~$5.00 내외, --reset 기준)
+비용 예상: 대상 논문당 ~$0.0010  (총 ~$3.00 내외, --reset 기준)
 
-추출 필드 (8→13):
+추출 필드 (13→15):
   synthesis_method, ce_precursor, solvent,
   synthesis_temperature_c, ph_synthesis,
   ce_concentration_M, mineralizer_concentration_M,
   synthesis_volume_mL,
-  capping_agent, chelating_agent, atmosphere,      ← NEW
-  calcination_temperature_c, crystallite_size_xrd_nm  ← NEW
+  capping_agent, chelating_agent, atmosphere,
+  calcination_temperature_c, crystallite_size_xrd_nm,
+  synthesis_time_h,    ← NEW (합성 시간 — Ostwald ripening 직결 변수)
+  morphology           ← NEW (입자 형태 — 분류 모델 타겟)
 
 실행:
   python 4_extract_targeted.py --dry-run        # 대상 확인만
@@ -45,11 +47,13 @@ TARGET_FIELDS = [
     "ce_concentration_M",
     "mineralizer_concentration_M",
     "synthesis_volume_mL",
-    "capping_agent",           # NEW — 입자 형태/크기 제어 유기분자
-    "chelating_agent",         # NEW — Ce 이온 착화 분자
-    "atmosphere",              # NEW — 합성/소성 분위기 가스
-    "calcination_temperature_c",  # NEW — 후열처리 온도 (℃)
-    "crystallite_size_xrd_nm", # NEW — XRD Scherrer 결정자 크기 (nm)
+    "capping_agent",              # 입자 형태/크기 제어 유기분자
+    "chelating_agent",            # Ce 이온 착화 분자
+    "atmosphere",                 # 합성/소성 분위기 가스
+    "calcination_temperature_c",  # 후열처리 온도 (℃)
+    "crystallite_size_xrd_nm",    # XRD Scherrer 결정자 크기 (nm)
+    "synthesis_time_h",           # NEW — 합성 반응 시간 (h)
+    "morphology",                 # NEW — 나노입자 형태 (TEM/SEM 기반)
 ]
 _BAD = {"", "nan", "none", "null", "n/a", "na", "unknown",
         "not specified", "not reported", "not mentioned", "not stated"}
@@ -79,7 +83,7 @@ _EXTRACTION_TOOL = {
     "type": "function",
     "function": {
         "name": "extract_synthesis_data",
-        "description": "Extract 13 CeO2 synthesis fields. Use null for missing values.",
+        "description": "Extract 15 CeO2 synthesis fields. Use null for missing values.",
         "strict": True,
         "parameters": {
             "type": "object",
@@ -90,6 +94,7 @@ _EXTRACTION_TOOL = {
                 "ce_concentration_M", "mineralizer_concentration_M", "synthesis_volume_mL",
                 "capping_agent", "chelating_agent", "atmosphere",
                 "calcination_temperature_c", "crystallite_size_xrd_nm",
+                "synthesis_time_h", "morphology",
             ],
             "properties": {
                 "synthesis_method": {
@@ -140,13 +145,20 @@ _EXTRACTION_TOOL = {
                     "Range: use final/target value."
                 ),
                 "ce_concentration_M": _nullable_num(
-                    "Ce precursor molar concentration mol/L. "
-                    "Calculate from mmol+volume: 5mmol in 50mL→0.1. "
-                    "null if only wt% or g."
+                    "Ce precursor molar concentration in mol/L. "
+                    "Formula: concentration = amount_mmol / final_volume_mL * 1000. "
+                    "IMPORTANT — 'final volume' means total reaction solution volume, "
+                    "not just the added water/solvent. "
+                    "Examples: '5 mmol Ce in 50 mL total' → 0.1; "
+                    "'5 mmol Ce dissolved, water added to 50 mL' → 0.1; "
+                    "'0.2 g Ce(NO3)3·6H2O (MW=434) in 40 mL' → 0.01149. "
+                    "null if only wt%, g without volume, or mole fraction given."
                 ),
                 "mineralizer_concentration_M": _nullable_num(
-                    "Mineralizer mol/L: NaOH, KOH, NH4OH, urea, HMTA, Na2CO3, etc. "
-                    "Calculate from mmol+volume. null if only % given."
+                    "Mineralizer (base/precipitant) molar concentration in mol/L. "
+                    "Mineralizers: NaOH, KOH, NH4OH, urea, HMTA, Na2CO3, NaHCO3, etc. "
+                    "Formula: same as ce_concentration_M — mmol / final_volume_mL * 1000. "
+                    "null if only wt%, drops, or excess amount given."
                 ),
                 "synthesis_volume_mL": _nullable_num(
                     "Total reaction solution volume in mL. "
@@ -174,19 +186,79 @@ _EXTRACTION_TOOL = {
                 ),
                 "crystallite_size_xrd_nm": _nullable_num(
                     "XRD Scherrer crystallite size in nm. "
-                    "'crystallite size X nm', 'D=X nm (Scherrer)', 'grain size X nm from XRD'."
+                    "'crystallite size X nm', 'D=X nm (Scherrer)', 'grain size X nm from XRD'. "
+                    "Do NOT use BET equivalent diameter or TEM/SEM particle size here."
                 ),
+                "synthesis_time_h": _nullable_num(
+                    "Synthesis/reaction duration in HOURS. Convert if needed: "
+                    "30 min→0.5, 90 min→1.5, 2 days→48. "
+                    "Hydrothermal/solvothermal: time inside autoclave. "
+                    "Precipitation: stirring/aging time after mixing. "
+                    "Do NOT include drying or calcination time. null if not stated."
+                ),
+                "morphology": {
+                    "anyOf": [
+                        {
+                            "type": "string",
+                            "enum": [
+                                "sphere", "cube", "rod", "wire", "tube",
+                                "flower", "plate", "octahedron",
+                                "porous", "hollow", "dendrite", "fiber", "other",
+                            ],
+                        },
+                        {"type": "null"},
+                    ],
+                    "description": (
+                        "Primary nanoparticle shape from TEM/SEM images or paper description. "
+                        "sphere=equiaxed nanoparticles; cube=nanocube/cubic; "
+                        "rod=elongated aspect ratio>3; wire=nanowire/nanofiber (AR>>10); "
+                        "tube=hollow 1D nanotube; flower=hierarchical flower-like assembly; "
+                        "plate=nanoplate/nanosheet/2D; octahedron=8-faced polyhedral; "
+                        "porous=mesoporous/nanoporous with visible pores; "
+                        "hollow=core-shell or nanocage; dendrite=branched tree-like; "
+                        "fiber=fiber/strand morphology; other=described but doesn't fit above. "
+                        "null if shape is not described anywhere in the paper."
+                    ),
+                },
             },
         },
     },
 }
 
-# ── 유저 프롬프트 (섹션 안내 — JSON 템플릿 제거, 스키마가 대신함) ─────────────
+# ── 유저 프롬프트 ────────────────────────────────────────────────────────────────
 USER_PROMPT = """\
-From this CeO2 synthesis paper, extract the 13 synthesis fields using the extract_synthesis_data tool.
-Search BOTH the Experimental section (synthesis_method, ce_precursor, solvent, temperature, pH,
-concentrations, volume, capping/chelating agent, atmosphere, calcination) AND
-the Results/Characterization section (crystallite_size_xrd_nm from XRD/Scherrer).
+From this CeO2 synthesis paper, extract the 15 synthesis fields using the extract_synthesis_data tool.
+
+SEARCH LOCATIONS:
+- Experimental section: synthesis_method, ce_precursor, solvent, synthesis_temperature_c,
+  ph_synthesis, ce_concentration_M, mineralizer_concentration_M, synthesis_volume_mL,
+  capping_agent, chelating_agent, atmosphere, calcination_temperature_c, synthesis_time_h
+- Results/Characterization section: crystallite_size_xrd_nm (XRD/Scherrer equation),
+  morphology (TEM/SEM image description or caption)
+
+CRITICAL RULES:
+1. crystallite_size_xrd_nm — XRD Scherrer only. REJECT BET equivalent diameter or TEM/SEM size.
+2. DLS/hydrodynamic size is NOT particle size — reject any value labeled:
+   z-average, hydrodynamic diameter, dynamic size, apparent diameter, Zetasizer, NanoSight,
+   PDI, z-size, effective diameter. Use null if only DLS values are available.
+3. Concentration: use final reaction volume (total solution), not just added solvent volume.
+4. synthesis_time_h: reaction/hydrothermal time only — exclude drying and calcination time.
+5. ce_precursor: Ce compound only — exclude dopant salts, noble metals, supports, organics.
+
+EXAMPLE (abbreviated — only non-null fields shown):
+  synthesis_method: "hydrothermal"
+  ce_precursor: "Ce(NO3)3·6H2O"
+  solvent: "water"
+  synthesis_temperature_c: 180
+  synthesis_time_h: 12
+  ph_synthesis: 9.0
+  ce_concentration_M: 0.1
+  mineralizer_concentration_M: 2.0
+  synthesis_volume_mL: 50
+  capping_agent: "PVP"
+  calcination_temperature_c: 500
+  crystallite_size_xrd_nm: 8.5
+  morphology: "rod"
 
 Paper text:
 {text}"""

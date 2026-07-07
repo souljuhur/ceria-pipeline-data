@@ -57,6 +57,14 @@ KEY_REPORT_COLS = [
 ]
 
 
+def _load_xlsx(path):
+    raw = pd.read_excel(path, sheet_name=0, header=None, nrows=15)
+    for idx, row in raw.iterrows():
+        if any(str(v).strip().lower() == "doi" for v in row):
+            return pd.read_excel(path, sheet_name=0, header=idx)
+    return pd.read_excel(path, sheet_name=0)
+
+
 def normalize_doi(doi) -> str:
     if pd.isna(doi):
         return ""
@@ -80,7 +88,7 @@ def main() -> None:
     print(f"  → {len(samples):,}행, {samples.shape[1]}컬럼")
 
     print(f"논문 Excel 로드: {EXCEL_PATH}")
-    papers = pd.read_excel(EXCEL_PATH, sheet_name=0)
+    papers = _load_xlsx(EXCEL_PATH)
     print(f"  → {len(papers):,}행, {papers.shape[1]}컬럼")
 
     # ── 2. DOI 키 생성 ────────────────────────────────────────────────────────

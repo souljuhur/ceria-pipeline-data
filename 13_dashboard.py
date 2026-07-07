@@ -43,7 +43,7 @@ with st.sidebar:
         label_visibility="collapsed",
     )
     st.divider()
-    if st.button("🔄 새로고침", width="stretch"):
+    if st.button("🔄 새로고침", use_container_width=True):
         st.cache_data.clear()
         st.rerun()
     # 서식 Excel 다운로드 버튼
@@ -54,7 +54,7 @@ with st.sidebar:
                 _f.read(),
                 file_name="ceria_synthesis_database_display.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                width="stretch",
+                use_container_width=True,
             )
     # 파일 수정 시각 표시
     def _mtime(path):
@@ -74,7 +74,7 @@ with st.sidebar:
 def load_excel() -> pd.DataFrame:
     if not os.path.exists(XLSX_PATH):
         return pd.DataFrame()
-    return pd.read_excel(XLSX_PATH, sheet_name=0)
+    return _load_xlsx_safe(XLSX_PATH)
 
 def _load_xlsx_safe(path) -> pd.DataFrame:
     """'doi' 컬럼 위치를 자동 감지하여 읽기 (요약 행 유무 무관)."""
@@ -282,7 +282,7 @@ if page == "📊 개요":
             ))
             fig.update_layout(margin=dict(t=30,b=10,l=0,r=0), height=300,
                               xaxis_title="", yaxis_title="")
-            st.plotly_chart(fig, width="stretch")
+            st.plotly_chart(fig, use_container_width=True)
             st.caption(f"전체 {len(scores):,}편 | 중앙값 {sorted(scores)[len(scores)//2]:.1f}%")
         else:
             st.info("ceria_dataset_full.jsonl 없음 — build_dataset.py 실행 후 표시")
@@ -332,8 +332,9 @@ if page == "📊 개요":
                 ))
                 fig.update_layout(margin=dict(t=30,b=10,l=0,r=0), height=300,
                                   xaxis_title="", yaxis_title="")
-                st.plotly_chart(fig, width="stretch")
-            st.caption(f"OA {oa_n:,}편 ({oa_n/total*100:.1f}%)  |  비-OA {noa_n:,}편 ({noa_n/total*100:.1f}%)")
+                st.plotly_chart(fig, use_container_width=True)
+            if total > 0:
+                st.caption(f"OA {oa_n:,}편 ({oa_n/total*100:.1f}%)  |  비-OA {noa_n:,}편 ({noa_n/total*100:.1f}%)")
         else:
             st.info("is_oa 컬럼 없음 — add_triage_tags.py 실행 후 표시")
 
@@ -409,7 +410,7 @@ if page == "📊 개요":
                 ),
                 yaxis_title="",
             )
-            st.plotly_chart(fig_y, width="stretch")
+            st.plotly_chart(fig_y, use_container_width=True)
             peak = int(year_all.idxmax())
             st.caption(
                 f"{int(year_all.index.min())}–{int(year_all.index.max())}년 | "
@@ -438,7 +439,7 @@ if page == "📊 개요":
                     ),
                     yaxis_title="",
                 )
-                st.plotly_chart(fig_c, width="stretch")
+                st.plotly_chart(fig_c, use_container_width=True)
                 peak_c = int(year_cmp.idxmax())
                 st.caption(
                     f"{int(year_cmp.index.min())}–{int(year_cmp.index.max())}년 | "
@@ -471,7 +472,7 @@ if page == "📊 개요":
                     xaxis=dict(title=""),
                     height=320,
                 )
-                st.plotly_chart(fig_m, width="stretch")
+                st.plotly_chart(fig_m, use_container_width=True)
                 st.caption(f"태그 있는 논문: {(df['tagged_methods'].fillna('') != '').sum():,}편")
             else:
                 st.info("태그 데이터 없음")
@@ -497,7 +498,7 @@ if page == "📊 개요":
                     xaxis=dict(title=""),
                     height=320,
                 )
-                st.plotly_chart(fig_mo, width="stretch")
+                st.plotly_chart(fig_mo, use_container_width=True)
                 st.caption(f"태그 있는 논문: {(df['tagged_morphologies'].fillna('') != '').sum():,}편")
             else:
                 st.info("태그 데이터 없음")
@@ -662,7 +663,7 @@ elif page == "🔍 DB 탐색":
 
     st.dataframe(
         filtered[show_cols].reset_index(drop=True),
-        width="stretch",
+        use_container_width=True,
         height=600,
     )
 
@@ -709,7 +710,7 @@ elif page == "🧪 샘플 결과":
         ))
         fig_m2.update_layout(margin=dict(t=30,b=10,l=0,r=0), height=320,
                              xaxis_title="", yaxis_title="")
-        st.plotly_chart(fig_m2, width="stretch")
+        st.plotly_chart(fig_m2, use_container_width=True)
 
     st.divider()
 
@@ -772,7 +773,7 @@ elif page == "🧪 샘플 결과":
         })
 
     if rows:
-        st.dataframe(pd.DataFrame(rows), width="stretch", height=600)
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, height=600)
         st.caption(f"필터 적용 결과: {len(rows):,}개")
     else:
         st.info("조건에 맞는 샘플이 없습니다.")
@@ -1132,7 +1133,7 @@ elif page == "📈 ML 결과":
     with ml_tabs[1]:
         def _sort_importance(paths):
             """particle_size_primary_nm 먼저, composite 다음, 나머지 알파벳순."""
-            ORDER = ["particle_size_primary_nm", "particle_size_composite",
+            ORDER = ["particle_size_primary_nm",
                      "particle_size_tem_nm", "particle_size_sem_nm",
                      "crystallite_size_xrd_nm", "morphology"]
             def _key(p):
@@ -1198,7 +1199,7 @@ elif page == "📈 ML 결과":
                     for j, png in enumerate(importance_pngs[i:i + cols_per_row]):
                         with _ic[j]:
                             cap = os.path.basename(png).replace("importance_", "").replace(".png", "")
-                            st.image(png, caption=cap, width="stretch")
+                            st.image(png, caption=cap, use_container_width=True)
             if shap_pngs:
                 st.divider()
                 st.markdown("**LightGBM SHAP 분석** (수치형 피처 한정 — particle_primary_nm · crystallite_xrd_nm)")
@@ -1222,7 +1223,7 @@ Permutation Importance와 달리 **방향성**을 알 수 있습니다.
                     for j, png in enumerate(shap_pngs[i:i + cols_per_row]):
                         with _ic[j]:
                             cap = os.path.basename(png).replace("shap_", "").replace(".png", "")
-                            st.image(png, caption=f"SHAP — {cap}", width="stretch")
+                            st.image(png, caption=f"SHAP — {cap}", use_container_width=True)
             if cb_importance_pngs or cb_shap_pngs:
                 st.divider()
                 st.markdown("**CatBoost 피처 중요도 & SHAP**")
@@ -1526,7 +1527,7 @@ T=164°C  pH=9  16h    ← 합성온도 / pH / 시간
                         num_c = tdf.select_dtypes("number").columns
                         fmt   = {c: "{:.2f}" for c in num_c}
                         st.dataframe(tdf.style.format(fmt, na_rep="—"),
-                                     width="stretch", hide_index=True)
+                                     use_container_width=True, hide_index=True)
                         tgt = os.path.basename(csv_path).replace(
                             "targeted_design_","").replace("nm.csv","")
                         st.caption(
@@ -1557,7 +1558,7 @@ T=164°C  pH=9  16h    ← 합성온도 / pH / 시간
                     with st.expander(f"🎯 HistGBM — {label}", expanded=True):
                         try:
                             idf = pd.read_csv(csv_path)
-                            st.dataframe(idf, width="stretch", hide_index=True)
+                            st.dataframe(idf, use_container_width=True, hide_index=True)
                             st.caption(f"{len(idf):,}개 후보 조건")
                         except Exception as e:
                             st.error(f"읽기 실패: {e}")
@@ -1571,7 +1572,7 @@ T=164°C  pH=9  16h    ← 합성온도 / pH / 시간
                             num_c = idf.select_dtypes("number").columns
                             fmt = {c: "{:.2f}" for c in num_c}
                             st.dataframe(idf.style.format(fmt, na_rep="—"),
-                                         width="stretch", hide_index=True)
+                                         use_container_width=True, hide_index=True)
                             st.caption(f"{len(idf):,}개 후보 조건 | uncertainty_sigma 기준 정렬")
                         except Exception as e:
                             st.error(f"읽기 실패: {e}")
@@ -1642,7 +1643,7 @@ T=164°C  pH=9  16h    ← 합성온도 / pH / 시간
                 num_cols = df_morph.select_dtypes("number").columns
                 fmt      = {c: "{:.2f}" for c in num_cols}
                 st.dataframe(df_morph.style.format(fmt, na_rep="—"),
-                             width="stretch", hide_index=True)
+                             use_container_width=True, hide_index=True)
                 st.caption(f"{len(df_morph)}개 제안 | uncertainty = 섀넌 엔트로피 (값이 클수록 형태 예측 불확실)")
             except Exception as e:
                 st.error(f"읽기 실패: {e}")
@@ -1675,7 +1676,7 @@ elif page == "⚙️ 운영 현황":
             col_df.style
                 .background_gradient(subset=["전체 대비(%)"], cmap="Blues", vmin=0, vmax=100)
                 .format({"보유 수": "{:,}", "미보유 수": "{:,}", "전체 대비(%)": "{:.1f}%"}),
-            width="stretch",
+            use_container_width=True,
             height=500,
             hide_index=True,
         )
@@ -1705,7 +1706,7 @@ elif page == "⚙️ 운영 현황":
             with st.expander(f"전문 수집 실패 DOI ({len(failed):,}개)"):
                 st.dataframe(
                     pd.DataFrame({"DOI": failed}),
-                    width="stretch", hide_index=True, height=300,
+                    use_container_width=True, hide_index=True, height=300,
                 )
     else:
         st.info("1_download.py 실행 전입니다.")
@@ -1742,7 +1743,7 @@ elif page == "⚙️ 운영 현황":
                 })
             st.dataframe(
                 pd.DataFrame(run_rows),
-                width="stretch", hide_index=True,
+                use_container_width=True, hide_index=True,
             )
     else:
         st.info("run_weekly.py를 아직 실행하지 않았습니다.")
@@ -1892,7 +1893,7 @@ elif page == "🔬 탐색 분석":
                     margin=dict(t=30, b=10),
                 )
                 fig.update_yaxes(type="log")
-                st.plotly_chart(fig, width="stretch")
+                st.plotly_chart(fig, use_container_width=True)
 
         # ── ② 합성온도 vs 1차 입자크기 ───────────────────────────────────────
         with tabs[1]:
@@ -2095,7 +2096,7 @@ elif page == "🔬 탐색 분석":
                     margin=dict(t=30, b=10),
                 )
                 fig.update_yaxes(type="log")
-                st.plotly_chart(fig, width="stretch")
+                st.plotly_chart(fig, use_container_width=True)
 
         # ── ⑥ 합성 조건 분포 (merged CSV 기반) ──────────────────────────────
         with tabs[5]:
@@ -2134,7 +2135,7 @@ elif page == "🔬 탐색 분석":
                             ))
                             fig_at.update_layout(margin=dict(t=10,b=10,l=0,r=0), height=300,
                                                  xaxis_title="", yaxis_title="샘플 수")
-                            st.plotly_chart(fig_at, width="stretch")
+                            st.plotly_chart(fig_at, use_container_width=True)
                             st.caption(f"매핑 완료: {len(_at):,}편 / 전체 {len(df_m):,}편")
                         else:
                             st.info("anion_type 데이터 없음 — 8_normalize_data.py 실행 후 표시")
@@ -2156,7 +2157,7 @@ elif page == "🔬 탐색 분석":
                             ))
                             fig_st.update_layout(margin=dict(t=10,b=10,l=0,r=0), height=300,
                                                  xaxis_title="", yaxis_title="샘플 수")
-                            st.plotly_chart(fig_st, width="stretch")
+                            st.plotly_chart(fig_st, use_container_width=True)
                             st.caption(f"매핑 완료: {len(_st):,}편 / 전체 {len(df_m):,}편")
                         else:
                             st.info("solvent_type 데이터 없음 — 8_normalize_data.py 실행 후 표시")
@@ -2182,7 +2183,7 @@ elif page == "🔬 탐색 분석":
                             fig_sm.update_layout(margin=dict(t=10,b=60,l=0,r=0), height=340,
                                                  xaxis_title="", yaxis_title="샘플 수",
                                                  xaxis_tickangle=-40)
-                            st.plotly_chart(fig_sm, width="stretch")
+                            st.plotly_chart(fig_sm, use_container_width=True)
                             st.caption(f"상위 15개 표시 · 전체 {_sm.nunique()}종")
 
                 # synthesis_temperature_c 히스토그램
@@ -2198,5 +2199,5 @@ elif page == "🔬 탐색 분석":
                             ))
                             fig_tc.update_layout(margin=dict(t=10,b=10,l=0,r=0), height=340,
                                                  xaxis_title="합성온도 (°C)", yaxis_title="샘플 수")
-                            st.plotly_chart(fig_tc, width="stretch")
+                            st.plotly_chart(fig_tc, use_container_width=True)
                             st.caption(f"n={len(_tc):,} · 중앙값 {_tc.median():.0f}°C · 평균 {_tc.mean():.0f}°C")
