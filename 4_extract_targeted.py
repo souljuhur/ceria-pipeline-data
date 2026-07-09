@@ -122,7 +122,12 @@ _EXTRACTION_TOOL = {
                 "ce_precursor": _nullable_str(
                     "STRICTLY the cerium-containing starting material only. "
                     "VALID examples: Ce(NO3)3·6H2O, CeCl3·7H2O, (NH4)2Ce(NO3)6, "
-                    "Ce(CH3COO)3, Ce(acac)3, Ce2(SO4)3, Ce(OiPr)3, CeO2, CeF3, Ce2(C2O4)3. "
+                    "Ce(CH3COO)3, Ce(acac)3, Ce2(SO4)3, Ce(OiPr)3, CeF3, Ce2(C2O4)3. "
+                    "⚠ Do NOT use 'CeO2' as a default guess — it is almost always the TARGET "
+                    "PRODUCT being synthesized/characterized (mentioned constantly throughout the "
+                    "paper), not the starting reagent. Only output 'CeO2' if the paper EXPLICITLY "
+                    "states pre-made/commercial CeO2 powder was redissolved or redispersed as a "
+                    "raw feedstock (rare). Otherwise use null. "
                     "CRITICAL — do NOT include ANY of the following: "
                     "(1) Dopant/co-metal salts: La, Sm, Gd, Nd, Pr, Eu, Zr, Fe, Ni, Co, "
                     "Cu, Zn, Mn, Al, Ti, Sn, Si, Y, Ba, Sr compounds — even if in the same solution; "
@@ -398,6 +403,15 @@ def main():
         if field not in df.columns:
             df[field] = None
             print(f"  신규 컬럼 추가: {field}")
+
+    # ce_precursor="CeO2" 의심값 초기화 (31차+ 진단: 프롬프트 CeO2 화이트리스트 버그로
+    # 실제 전구체 대신 최종 생성물명이 대신 들어간 오분류, 원문대조 검증됨) → 재추출 대상 편입
+    if "ce_precursor" in df.columns:
+        suspect = df["ce_precursor"].astype(str).str.strip() == "CeO2"
+        n_suspect = int(suspect.sum())
+        if n_suspect:
+            df.loc[suspect, "ce_precursor"] = None
+            print(f"  ce_precursor='CeO2' 의심값 {n_suspect:,}행 초기화 (재추출 대상 편입)")
 
     # ── 대상 DOI 선정 ─────────────────────────────────────────────────────────
     missing_per_field = {}

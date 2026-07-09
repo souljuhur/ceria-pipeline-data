@@ -140,7 +140,12 @@ D. SYNTHESIS METHOD — EXACT DISAMBIGUATION:
 E. PRECURSOR FIELD ACCURACY:
    ce_precursor = ONLY the cerium compound (Ce source). Never include solvent or mineralizer.
    If Ce(NO3)3·6H2O dissolved in ethanol → ce_precursor="Ce(NO3)3·6H2O", solvent="ethanol"
-   If CeO2 itself is used as starting material → ce_precursor="CeO2"
+   ⚠ CeO2 is almost always the TARGET PRODUCT being synthesized/characterized, NOT the starting
+     reagent — it appears constantly throughout every paper. Do NOT default to "CeO2" just because
+     the actual precursor salt wasn't found nearby. Only use ce_precursor="CeO2" if the paper
+     EXPLICITLY states that pre-made/commercial CeO2 powder was redissolved, redispersed, or used
+     as a raw material feedstock for further processing (rare). If no such explicit statement exists
+     and no other Ce salt is mentioned, use null instead of "CeO2".
    Dopant precursors (Gd(NO3)3, La(NO3)3, Sm(NO3)3) → dopant field only, NOT ce_precursor
    Ce(NO3)3 and (NH4)2Ce(NO3)6 are ALWAYS ce_precursor, NEVER oxidant
    H2O2 added separately to oxidize Ce³⁺ → Ce⁴⁺ → oxidant
@@ -160,7 +165,9 @@ F. CROSS-SECTION LINKING — MOST IMPORTANT:
   · Acetate: "Ce(CH3COO)3"   (= Ce(OAc)3, cerium(III) acetate, cerous acetate)
   · Sulfate: "Ce2(SO4)3", "Ce(SO4)2"   Carbonate: "Ce2(CO3)3"   Oxalate: "Ce2(C2O4)3"
   · Sol-gel precursors: "Ce(acac)3", "Ce(OiPr)4" (cerium isopropoxide), "Ce(OEt)4"
-  · Other: "CeO2" (used as starting material), "Ce(OH)3", "CeF3"
+  · Other: "Ce(OH)3", "CeF3"
+  · "CeO2" ONLY if explicitly redissolved/redispersed as a raw feedstock (rare) — NEVER as a
+    default guess when the actual starting salt is unclear (CeO2 is the product, not a reagent).
   Output: canonical formula or abbreviation. null if not stated.
 
 - solvent         : Main liquid medium for CeO2 synthesis. Mixed → semicolon-separated ("water;ethanol").

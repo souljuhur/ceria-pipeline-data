@@ -144,12 +144,25 @@ def save_text(doi: str, text: str) -> bool:
     return True
 
 def pdf_to_text(doi_or_stem: str) -> str:
-    """PDF → 텍스트 (pdfplumber). doi 또는 파일명 stem 모두 허용."""
+    """PDF → 텍스트 (PyMuPDF 우선, pdfplumber 폴백). doi 또는 파일명 stem 모두 허용.
+
+    30차+ 세션 진단: pdfplumber는 ToUnicode CMap이 없는 서브셋 폰트(Wiley/Elsevier 등)에서
+    "(cid:N)" 플레이스홀더를 남겨 수화물 점(·)·아래첨자 등이 깨짐 (전체 텍스트의 36% 영향,
+    ce_precursor 등 화학식 파싱 오류의 주 원인). PyMuPDF(fitz)는 동일 PDF에서 cid 깨짐 0건 확인.
+    """
     # stem 직접 전달 시 그대로 사용, DOI면 안전 파일명으로 변환
     stem = doi_or_stem if (PDF_DIR / f"{doi_or_stem}.pdf").exists() else _safe_fname(doi_or_stem)
     pdf_path = PDF_DIR / f"{stem}.pdf"
     if not pdf_path.exists():
         return ""
+    try:
+        import fitz
+        with fitz.open(pdf_path) as doc:
+            text = "\n".join(page.get_text() for page in list(doc)[:30])
+        if len(text.strip()) >= 300:
+            return text
+    except Exception:
+        pass
     try:
         import pdfplumber
         with pdfplumber.open(pdf_path) as pdf:
