@@ -391,6 +391,10 @@ def main():
     parser.add_argument("--limit",    type=int, default=0)
     parser.add_argument("--workers",  type=int, default=20,
                         help="병렬 API 호출 수 (기본 20, 최대 권장 40)")
+    parser.add_argument("--skip-audit", action="store_true",
+                        help="재추출 후 자동 감사(audit_extraction_accuracy.py) 생략")
+    parser.add_argument("--audit-n",  type=int, default=20,
+                        help="자동 감사 tier2 GPT 샘플 수 (기본 20)")
     args = parser.parse_args()
 
     # ── CSV 로드 ──────────────────────────────────────────────────────────────
@@ -545,6 +549,20 @@ def main():
     print("  python 5_table_extract.py")
     print("  python 6_fill_keywords.py ~ python 12_model.py")
     print("=" * 60)
+
+    # ── 자동 감사 (31차+ 세션: ce_precursor=CeO2 오분류·PDF 손상 재발 방지) ──────
+    if not args.skip_audit:
+        try:
+            import subprocess
+            print("\n[자동 감사] audit_extraction_accuracy.py 실행 중...")
+            subprocess.run(
+                [sys.executable, str(BASE / "audit_extraction_accuracy.py"),
+                 "--n", str(args.audit_n)],
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+                check=False,
+            )
+        except Exception as e:
+            print(f"  자동 감사 실행 실패(무시): {e}")
 
 
 if __name__ == "__main__":
