@@ -83,6 +83,9 @@ ceria_pipeline_data/
 ├── diagnose_ml.py               ML 진단 스크립트 (24차 신규) — 5개 진단
 │                                DIAG-1 동일split / DIAG-2 노이즈천장 / DIAG-3 baseline
 │                                DIAG-5 구간잔차 / DIAG-6 TEM-SEM bias
+├── audit_extraction_accuracy.py 추출 정확도 자동 감사 (32차 신규) — 재추출 후 상시 실행
+│                                Tier1(무료,전수) 원문대조 / Tier2(GPT 샘플) 의미검증
+│                                `4_extract_targeted.py` 완료 후 자동 실행 (--skip-audit로 생략)
 │
 │  ── 유틸리티 (utils/) ──────────────────────────────────────────────
 ├── utils/
@@ -136,41 +139,51 @@ ceria_pipeline_data/
 
 ---
 
-## 현재 진행 상황 (2026-07-07 기준 — 31차 세션 완료)
+## 현재 진행 상황 (2026-07-13 기준 — 33차 세션 완료)
 
 > ⚠️ **논문 수집 중단**: 0_collect.py, 0_merge_new.py, run_weekly.py — 별도 지시 전까지 실행 금지
 
 | 항목 | 수치 |
 |------|------|
 | 총 논문 (수집) | 7,278편 → **3,860편** (23차 비세리아 필터링 후: 3,359편 제거) |
-| 전문(full text) 보유 | **2,879편** (text/ 기준, 필터 후) |
+| 전문(full text) 보유 | **2,879편** (text/ 기준, 필터 후) — 32차: 손상 1,954개 파일 PyMuPDF로 재추출(내용 갱신, 편수 동일) |
 | PDF 파일 | **4,161개** (pdf/ 폴더 — 필터 대상 외) |
 | GPT 추출 완료 | **2,879편** (26차 2_extract.py 전면 재작성 후) |
 | 추출 샘플 수 | **8,819행** (26차 재추출 — 25차 6,403 → +2,416) |
 | 1차 입자크기 커버리지 (TEM+SEM) | **48.4%** (4,249/8,819 valid rows) ← 26차 |
-| crystallite_size_xrd_nm 샘플 수 | **n=3,421** (29차 재추출 후 — 27차 3,148 → +273) |
+| crystallite_size_xrd_nm 샘플 수 | **n=3,586~3,595** (32차 재추출 후 — 29차 3,421 → +165, 모델별 상이) |
 | ML 모델 피처 수 | **33개** (21 수치 + **12 범주형**) |
-| ML 모델 R² (primary_nm, HistGBM) | **-0.063** (MAE=28.70nm, n=4249) ← **31차** |
-| ML 모델 R² (primary_nm, LightGBM) | **+0.016** (MAE=28.35nm, n=4249) ← **31차** |
-| ML 모델 R² (primary_nm, CatBoost) | **+0.123** (MAE=26.69nm, n=4259) ← **31차** |
-| ML 모델 R² (primary_nm, DKL-GP) | **+0.072** (MAE=24.82nm, PICP=0.815, n=4249) ← **31차** |
-| ML 모델 R² (xrd_nm, HistGBM) | **+0.002** (MAE=10.76nm, n=3421) ← **31차** |
-| ML 모델 R² (xrd_nm, LightGBM) | **+0.077** (MAE=10.51nm, n=3421) ← **31차** |
-| ML 모델 R² (xrd_nm, CatBoost) | **+0.062** (MAE=10.49nm, n=3430) ← **31차** |
+| ML 모델 R² (primary_nm, HistGBM) | **-0.050** (MAE=28.88nm, n=4249) ← **32차** (31차 -0.063 대비 개선) |
+| ML 모델 R² (primary_nm, LightGBM) | **+0.016** (MAE=28.35nm, n=4249) ← 31차 값 유지 (32차 미재실행) |
+| ML 모델 R² (primary_nm, CatBoost) | **+0.107** (MAE=26.96nm, n=4259) ← **32차** (31차 +0.123 대비 하락, best_params 미재탐색) |
+| ML 모델 R² (primary_nm, DKL-GP) | **+0.020** (MAE=24.24nm, PICP=0.812, n=4249) ← **32차** (31차 +0.072 대비 큰 폭 하락) |
+| ML 모델 R² (xrd_nm, HistGBM) | **+0.0017** (MAE=10.62nm, n=3586) ← **32차** (거의 동일) |
+| ML 모델 R² (xrd_nm, LightGBM) | **+0.077** (MAE=10.51nm, n=3421) ← 31차 값 유지 (32차 미재실행) |
+| ML 모델 R² (xrd_nm, CatBoost) | **+0.085** (MAE=10.22nm, n=3595) ← **32차** (31차 +0.062 대비 개선) |
 | unidentified_method 행 수 | **286행** (28차 Section 1c 77행 복구 — 26차 363행) |
 | ce_precursor Non-Ce 정제 | **214행 NULL 처리** (28차 Section 1d — 도펀트·식물추출물 등 오분류 제거) |
+| ce_precursor="CeO2" 오분류 | **12.3% → 3.5%** (32차 — 프롬프트 화이트리스트 버그 수정 + 의심값 재추출) |
+| 추출 정확도 감사 (33차, tier1) | ce_precursor 원문 미검출 의심 **41.6%** (3,413/8,210) — 정규화 매칭 한계로 과탐 가능성, 미확정 |
+| 추출 정확도 감사 (33차, tier2 GPT 20편) | 14건 flag → 원문대조 결과 **13건 오탐**(감사관 자기모순/과탐), 실제 이슈 후보 1건(다중조건 논문 값 혼선) |
 | 추출 필드 수 | **15개** (29차: synthesis_time_h·morphology 추가) |
 | Excel 열 수 | **48열** (11_format_excel.py 기준) |
 
-### 최신 모델 성능 비교 (31차 기준, particle_size_primary_nm)
+### 최신 모델 성능 비교 (32차 기준, particle_size_primary_nm)
 
-| 모델 | log-R² | nm-MAE | RMSE | MdAE | n | vs 29차 |
+| 모델 | log-R² | nm-MAE | RMSE | MdAE | n | vs 31차 |
 |------|--------|--------|------|------|---|---------|
-| HistGBM | **-0.063** | 28.70 | 66.87 | 9.32 | 4249 | 동일 |
-| LightGBM (12b) | **+0.016** | 28.35 | 66.39 | 9.19 | 4249 | **+0.003** |
-| CatBoost | **+0.123** | **26.69** | 65.86 | 8.25 | 4259 | 동일 |
-| DKL-GP (inducing=512) | **+0.072** | **24.82** | 64.53 | 9.08 | 4249 | **+0.019** |
+| HistGBM | **-0.050** | 28.88 | 67.31 | 9.37 | 4249 | **+0.013** |
+| LightGBM (12b) | +0.016 | 28.35 | 66.39 | 9.19 | 4249 | 미재실행 (31차 값) |
+| CatBoost | **+0.107** | 26.96 | 66.29 | 8.42 | 4259 | **-0.016** |
+| DKL-GP (inducing=512) | **+0.020** | **24.24** | 64.07 | 7.65 | 4249 | **-0.052** |
 
+> **32차 (2026-07-09~10, 커밋 885f6aa)**: `ce_precursor="CeO2"` 오분류 버그(프롬프트가 CeO2를 유효 전구체
+> 예시로 잘못 포함 — 최종 생성물명이 전구체로 오추출됨, 12.3%→3.5% 개선) + PDF 텍스트 손상(pdfplumber
+> `(cid:N)` 깨짐, 코퍼스 36%→0%) 근본 원인 수정. 손상 텍스트 1,954개 파일 PyMuPDF로 재추출 후 전 모델
+> 재학습. **HistGBM은 개선**(-0.063→-0.050)했으나 **DKL-GP는 큰 폭 하락**(+0.072→+0.020),
+> CatBoost도 소폭 하락(+0.123→+0.107 — best_params.json은 6/28 데이터 기준 그대로 사용, 재탐색 안 함).
+> 텍스트/전구체 품질 자체는 개선됐으나 ML 지표는 아직 일관되게 반영되지 않음 — 원인 미조사(미완료 항목 참고).
+>
 > **31차**: 30차 버그 수정(safe_encode collision·fold 내부 인코딩·val-only 평가·농도 필터) 반영한
 > 전 모델 재학습. LightGBM +0.016(+0.003), DKL-GP +0.072(+0.019) 소폭 개선.
 > HistGBM·CatBoost는 동일 수준 유지. DKL-GP ep70 조기종료→ep30 선택(val-MAE=0.8699 @ep20).
@@ -184,17 +197,20 @@ ceria_pipeline_data/
 > MAE **25.37nm (전체 모델 최저)**. CatBoost --tune 26차 데이터 재탐색 → depth=8 신규 best_params,
 > log-R²=+0.138로 소폭 개선.
 
-### 31차 crystallite_size_xrd_nm 성능
+### 32차 crystallite_size_xrd_nm 성능
 
-| 모델 | 29차 | 31차 | n | 비고 |
+| 모델 | 31차 | 32차 | n | 비고 |
 |------|------|------|---|------|
-| HistGBM | +0.002 | **+0.002** | 3,421 | 동일 |
-| LightGBM | +0.077 | **+0.077** | 3,421 | 동일 |
-| CatBoost | +0.062 | **+0.062** | 3,430 | 동일 |
+| HistGBM | +0.002 | **+0.0017** | 3,586 | 거의 동일, n +165 (PDF 재추출 효과) |
+| LightGBM | +0.077 | +0.077 | 3,421 | 미재실행 (31차 값 유지) |
+| CatBoost | +0.062 | **+0.085** | 3,595 | 개선, n +165 |
 
 > **XRD 노이즈 필터 효과** (21차 기준): `12_model.py`에 `between(2, 150)` 필터 → 26차 72건 제거
 > 물리적 근거: Scherrer equation 유효 범위 2~150nm (< 2nm 불가, > 150nm Scherrer 한계 초과)
 
+> ※ DKL-GP 32차: ep?? 조기종료, val-MAE 기준 선택 → log-R²=**+0.020**, 실측 MAE=24.24nm(역대 최저 갱신),
+>    PICP=0.812. ce_precursor·PDF 텍스트 수정 후 재학습에서 31차(+0.072) 대비 하락 — 원인 미조사.
+>
 > ※ DKL-GP 31차: ep70 조기종료(patience=10), top-3 버퍼 중 ep30 선택 → log-R²=**+0.072**
 >    val-MAE best=0.8464(ep20). 29차(+0.053) 대비 +0.019 개선 — safe_encode·val-only 수정 효과.
 >
@@ -270,12 +286,15 @@ streamlit run 13_dashboard.py       # 대시보드 (http://localhost:8501)
 
 ### 다음 세션 시작 시
 
-31차 완료 상태. 30차 버그 수정 반영 후 전 모델 재학습 완료.
-- 성능 현황: HistGBM **-0.063** / LightGBM **+0.016** / CatBoost **+0.123** / DKL-GP **+0.072**
-- 31차 재학습 효과: LightGBM +0.003, DKL-GP +0.019 소폭 개선 (safe_encode·val-only 수정 효과)
-- GitHub 커밋 필요 — CMD에서 `git push origin main` 실행 필요
-- CatBoost segfault: 모델 저장 후 cleanup 단계에서 발생 — pkl 파일은 정상, performance_history catboost 필드는 null
-- 미해결: DKL-GP log-R² 하락 원인 (+0.321→+0.072) 부분 회복됐으나 27차 수준 미달
+33차 완료 상태. 32차(ce_precursor CeO2 오분류·PDF 텍스트 손상 수정) 재학습 + 33차(감사 도구 커밋·검증) 완료.
+- 성능 현황: HistGBM **-0.050** / LightGBM **+0.016**(31차 값, 미재실행) / CatBoost **+0.107** / DKL-GP **+0.020**
+- 32차 재학습 효과: HistGBM +0.013 개선, CatBoost -0.016·DKL-GP -0.052 하락 — 텍스트 품질은 개선됐으나 ML 지표에 아직 일관 반영 안 됨
+- LightGBM(12b)·LightGBM 역설계(12d_targeted_design)는 32차 데이터로 아직 재실행 안 함 — 필요시 재실행 권장
+- CatBoost best_params.json은 6/28(29차) 탐색 결과 그대로 사용 중 — 32차 데이터로 `--tune` 재탐색 안 함
+- GitHub 커밋 완료(`b40ce1c1`) — push는 여전히 CMD에서 `git push origin main` 실행 필요 (1 commit ahead)
+- CatBoost segfault: 모델 저장 후 cleanup 단계에서 발생 — pkl 파일은 정상, 기능상 문제 없음 (지속 관찰 중)
+- 미해결: DKL-GP log-R² 하락 원인 (+0.321(27차) → +0.072(31차) → **+0.020(32차)**, 계속 하락 추세) — 아래 미완료 항목 1번 참고
+- 신규: `audit_extraction_accuracy.py` tier1에서 ce_precursor 41.6% 원문 미검출 flag — 정규화 매칭 한계로 과탐 가능성 높으나 미검증. 표본 확인 필요
 
 필요시 재학습:
 
@@ -622,6 +641,9 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 
 | 세션 | 파일 | 버그 | 수정 |
 |------|------|------|------|
+| 32차 | **2_extract.py**, **4_extract_targeted.py** | ce_precursor 스키마 설명에 `CeO2`를 유효 전구체 예시로 포함 — 논문 전체에서 계속 언급되는 최종 생성물명(CeO2)이 시작 시약으로 오추출됨 (ML 데이터셋 12.3% 영향) | 스키마 예시에서 `CeO2` 제거, "CeO2를 기본값으로 추측하지 말 것" 경고 추가 — 사전제작 CeO2 분말을 재용해한 경우만 예외 허용 |
+| 32차 | **4_extract_targeted.py** | 기존 ce_precursor="CeO2" 값이 위 버그로 오분류된 채 캐시에 남아 재추출 대상에서 누락됨 | main()에 의심값(`== "CeO2"`) 자동 NULL 초기화 로직 추가 → 재추출 대상 자동 편입 |
+| 32차 | **1_download.py** | pdfplumber가 서브셋 폰트 PDF에서 `(cid:N)` 플레이스홀더를 남겨 텍스트 코퍼스의 36%에서 화학식·수치 파싱 방해 | PyMuPDF(fitz)를 1차 추출기로, pdfplumber는 실패 시 폴백으로 전환 |
 | 30차 | **2_extract.py** | `print(f"  출력: {OUT_JSONL}")` 가 `if __name__ == "__main__":` 블록 밖(column 0)에 위치 → import 시 항상 실행됨 | 들여쓰기 4칸 추가로 가드 안으로 이동 |
 | 30차 | **setup_auto.py** | `PYTHON_EXE = sys.executable` — 잘못된 conda 환경에서 실행 시 Task Scheduler에 base Python 경로가 등록돼 월간 자동화 무음 실패 가능 | `if "envs\\test" not in PYTHON_EXE` 검증 추가, 불일치 시 즉시 SystemExit |
 | 30차 | **run_weekly.py** | post_steps 설명 문자열이 `"핵심 13필드 재추출"` — 29차 이후 15필드로 확장됐으나 라벨 미갱신 | `"핵심 15필드 재추출"` 로 수정 |
@@ -893,12 +915,39 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 | **HistGBM·CatBoost** | 동일 수준 유지 (primary -0.063 / +0.123, xrd +0.002 / +0.062) |
 | **CatBoost segfault** | 모든 pkl 저장 완료 후 cleanup 단계에서 발생 — 모델 자체 정상 |
 
+### 32차 세션 (2026-07-09~10, 커밋 885f6aa)
+
+| 작업 | 결과 |
+|------|------|
+| **ce_precursor="CeO2" 오분류 근본 원인 수정** (`2_extract.py`, `4_extract_targeted.py`) | 프롬프트 화이트리스트 버그(최종 생성물명을 전구체로 오추출) 수정, 의심값 자동 NULL 재추출 로직 추가 → **12.3%→3.5%** |
+| **PDF 텍스트 손상 근본 원인 수정** (`1_download.py`) | pdfplumber `(cid:N)` 깨짐 → PyMuPDF 우선 추출로 전환, 코퍼스 영향 **36%→0%** |
+| 손상 텍스트 재추출 | text/ 1,954개 파일 PyMuPDF로 재추출 |
+| `4_extract_targeted.py --reset` + 전 모델 재학습 | crystallite_size_xrd_nm n=3,421→**3,586~3,595**(+165) |
+| **HistGBM** | primary_nm **-0.050** (31차 -0.063 대비 +0.013 개선) |
+| **CatBoost** (best_params 재탐색 없이 재사용) | primary_nm **+0.107** (31차 +0.123 대비 -0.016), xrd **+0.085** (31차 +0.062 대비 개선) |
+| **DKL-GP** | primary_nm **+0.020** (31차 +0.072 대비 -0.052 큰 폭 하락) — 원인 미조사 |
+| LightGBM (12b), LightGBM 역설계 (12d_targeted_design) | 미재실행 (31차 값 유지) |
+
+### 33차 세션 (2026-07-13)
+
+| 작업 | 결과 |
+|------|------|
+| **32차 미문서화 작업 검증** | git log·performance_history.json·pipeline_state.json 대조로 32차(커밋 885f6aa) 성능 변화 확인 및 본 문서 반영 |
+| **`audit_extraction_accuracy.py` 신규 도구 커밋** | Tier1(원문대조 전수) + Tier2(GPT 샘플 의미검증) 2단계 감사, `4_extract_targeted.py`에 자동 실행 훅 추가(`--skip-audit`로 생략 가능) |
+| **Tier1 결과 확인** | ce_precursor 41.6%(3,413/8,210) 원문 미검출 flag — 정규화 매칭 한계로 인한 과탐 가능성, 미확정 |
+| **Tier2 결과 수동 검증 (원문 대조)** | GPT flag 14건 중 **13건 오탐**(감사관 자체 계산·인정과 모순되는 flag 다수) 확인, 실제 검토 필요 1건(다중 온도조건 논문에서 최적조건 아닌 중간값 추출) 확정 |
+| **`.gitignore`에 `text_backup_pdfplumber/` 추가** | PyMuPDF 전환 전 백업본(103MB, 1,954개 파일) 커밋 방지 |
+| **커밋** (`b40ce1c1`) | `.gitignore`, `4_extract_targeted.py`, `audit_extraction_accuracy.py` — push는 미실행 (CMD 필요) |
+
 ---
 
 ## 미완료 항목 (우선순위 순)
 
-1. **[조사]** DKL-GP log-R² 하락 원인 규명 (+0.321→+0.072) — 31차 부분 회복(+0.019)이나 27차 수준(+0.321) 미달. ce_precursor 정제 후 데이터 분포 변화 또는 GroupShuffleSplit train/val DOI 분할 차이 가능성. val-only 평가 전환 이후 지표가 이전 세션과 비교 불가한 점 유의.
-2. **[저우선]** GitHub push — CMD에서 직접 실행 필요:
+1. **[조사]** DKL-GP log-R² 지속 하락 원인 규명 — 27차 **+0.321** → 31차 +0.072 → 32차 **+0.020**로 3연속 하락. ce_precursor/PDF 텍스트 정제로 데이터 분포가 계속 바뀌는 것, 또는 GroupShuffleSplit train/val DOI 분할 차이 가능성. val-only 평가 전환(30차) 이후 지표가 이전 세션과 직접 비교 불가한 점 유의.
+2. **[검토]** CatBoost `--tune` 재탐색 필요 여부 판단 — best_params.json이 6/28(29차) 데이터 기준으로 고정된 채 32차(ce_precursor·PDF 수정 후) 데이터에 재사용되어 소폭 하락(+0.123→+0.107). 데이터 분포가 유의미하게 바뀌었다면 재탐색(~2.5~3시간) 권장.
+3. **[검토]** `audit_tier1_text_presence.csv`의 ce_precursor 41.6% flag 표본 확인 — 실제 오류인지, 정규화(`_normalize`) 함수가 화학식 표기(아래첨자·특수기호·약어 등)를 못 잡는 매칭 한계로 인한 과탐인지 사람이 20~30건 표본 검토 필요. 과탐이면 `_value_found_in_text()` 매칭 로직(어간 완화 등) 개선 검토.
+4. **[미실행]** LightGBM(12b_lgbm_baseline.py), LightGBM 역설계(12d_targeted_design.py) — 32차 재추출 데이터로 아직 재실행 안 됨. 재실행 시 다른 모델과 동일 데이터 기준으로 비교 가능.
+5. **[저우선]** GitHub push — CMD에서 직접 실행 필요 (현재 origin/main 대비 1 commit ahead: `b40ce1c1`):
    ```cmd
    cd "d:\머신러닝 교육\ceria_pipeline_data"
    git push origin main
