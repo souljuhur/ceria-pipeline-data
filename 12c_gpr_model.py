@@ -65,6 +65,15 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import GroupShuffleSplit
 import matplotlib.font_manager as _fm
 
+# 34차: 재현성 고정 — 시드 미고정 시 NN 초기화·유도점 초기화·DataLoader 셔플·dropout이
+# 매 실행마다 달라져, 세션 간 log-R² 변동(27차 +0.321→32차 +0.020)이 데이터 품질 변화 때문인지
+# 학습 노이즈 때문인지 구분 불가능했음 (val set이 ~637행으로 작고 기저 R²도 0에 가까워 민감도 높음).
+SEED = 42
+torch.manual_seed(SEED)
+np.random.seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(SEED)
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 _avail_fonts = {f.name for f in _fm.fontManager.ttflist}
 for _fn in ["Malgun Gothic", "NanumGothic", "NanumBarunGothic", "AppleGothic", "DejaVu Sans"]:

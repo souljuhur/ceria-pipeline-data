@@ -72,7 +72,51 @@ def _normalize(s: str) -> str:
     return re.sub(r"[^a-z0-9]", "", str(s).lower())
 
 
-def _value_found_in_text(value: str, text_norm: str) -> bool:
+# 34차: ce_precursor 화학식↔화학명 동치 검사 (원문이 "cerium nitrate hexahydrate"처럼
+# 산문 화학명으로 서술된 경우, GPT가 정확히 표준 화학식(Ce(NO3)3·6H2O)으로 변환해도
+# 리터럴 문자열 대조로는 잡히지 않아 과탐(false positive) 발생 — 33차 감사에서 확인된
+# 41.6% flag의 대부분이 이 패턴으로 추정됨 (표본 검토: 28건 중 11건 심층 확인, 10건이
+# 이 유형의 과탐, 1건만 실제 의심 사례).
+_ANION_ALIASES = [
+    (re.compile(r"\(nh4\)2ce\(no3\)6|nh42ceno36", re.IGNORECASE), ["ammoniumcericnitrate", "cericammoniumnitrate"]),
+    (re.compile(r"no3", re.IGNORECASE), ["nitrate"]),
+    (re.compile(r"(?<!f)cl(?!o)", re.IGNORECASE), ["chloride"]),
+    (re.compile(r"so4", re.IGNORECASE), ["sulfate", "sulphate"]),
+    (re.compile(r"ch3coo|\boac\b|acetate", re.IGNORECASE), ["acetate"]),
+    (re.compile(r"co3", re.IGNORECASE), ["carbonate"]),
+    (re.compile(r"c2o4|oxalate", re.IGNORECASE), ["oxalate"]),
+    (re.compile(r"\(oh\)", re.IGNORECASE), ["hydroxide"]),
+    (re.compile(r"acac", re.IGNORECASE), ["acetylacetonate"]),
+]
+_HYDRATE_ALIASES = {
+    1: "monohydrate", 2: "dihydrate", 3: "trihydrate", 4: "tetrahydrate",
+    5: "pentahydrate", 6: "hexahydrate", 7: "heptahydrate", 8: "octahydrate",
+    9: "nonahydrate", 10: "decahydrate",
+}
+_HYDRATE_RE = re.compile(r"[·∙.\-]\s*(\d+)\s*H(?:2|₂)?O", re.IGNORECASE)
+
+
+def _ce_precursor_alt_match(raw_value: str, text_norm: str) -> bool:
+    """화학명 산문 표현(예: cerium nitrate hexahydrate)이 원문에 있는지 확인."""
+    found_anion = False
+    for pat, names in _ANION_ALIASES:
+        if pat.search(raw_value):
+            if not any(_normalize(n) in text_norm for n in names):
+                return False  # 화학식상 음이온은 있는데 원문에 해당 이름이 전혀 없음
+            found_anion = True
+            break
+    if not found_anion:
+        return False  # 인식 가능한 음이온 패턴 없음 — 대체 검사 불가
+
+    m = _HYDRATE_RE.search(raw_value)
+    if m:
+        name = _HYDRATE_ALIASES.get(int(m.group(1)))
+        if name and _normalize(name) not in text_norm:
+            return False  # 수화물 개수가 formula엔 있는데 원문 화학명과 불일치
+    return True
+
+
+def _value_found_in_text(value: str, text_norm: str, field: str = "") -> bool:
     """세미콜론으로 구분된 다중값은 개별 토큰 중 하나라도 원문에 있으면 통과."""
     for token in str(value).split(";"):
         token = token.strip()
@@ -84,6 +128,8 @@ def _value_found_in_text(value: str, text_norm: str) -> bool:
         if v_norm in text_norm:
             continue
         if v_norm[:5] in text_norm:  # 어간 수준 완화 매칭 (spherical vs sphere 등)
+            continue
+        if field == "ce_precursor" and _ce_precursor_alt_match(token, text_norm):
             continue
         return False
     return True
@@ -116,7 +162,7 @@ def run_tier1(df: pd.DataFrame) -> pd.DataFrame:
                 val = row.get(field)
                 if _is_empty(val):
                     continue
-                if not _value_found_in_text(val, text_norm):
+                if not _value_found_in_text(val, text_norm, field=field):
                     flags.append({
                         "doi": doi, "row_index": idx, "field": field,
                         "extracted_value": val,
