@@ -139,7 +139,7 @@ ceria_pipeline_data/
 
 ---
 
-## 현재 진행 상황 (2026-07-15 기준 — 34차 세션 진행 중)
+## 현재 진행 상황 (2026-07-16 기준 — 34차 세션 완료)
 
 > ⚠️ **논문 수집 중단**: 0_collect.py, 0_merge_new.py, run_weekly.py — 별도 지시 전까지 실행 금지
 
@@ -155,11 +155,11 @@ ceria_pipeline_data/
 | ML 모델 피처 수 | **33개** (21 수치 + **12 범주형**) |
 | ML 모델 R² (primary_nm, HistGBM) | **-0.050** (MAE=28.88nm, n=4249) ← **32차** (31차 -0.063 대비 개선) |
 | ML 모델 R² (primary_nm, LightGBM) | **+0.018** (MAE=28.41nm, n=4249) ← **34차 재실행** (31차 +0.016 대비 거의 동일) |
-| ML 모델 R² (primary_nm, CatBoost) | **+0.107** (MAE=26.96nm, n=4259) ← 32차 값 (34차 `--tune` 재탐색 진행 중, 완료 시 갱신 예정) |
+| ML 모델 R² (primary_nm, CatBoost) | **+0.123** (MAE=26.76nm, n=4259) ← **34차 `--tune` 재탐색 완료** (32차 +0.107 대비 개선, 60회 탐색·9시간56분) |
 | ML 모델 R² (primary_nm, DKL-GP) | **+0.020** (MAE=24.24nm, PICP=0.812, n=4249) ← 32차 값 (34차: 학습 시드 미고정 확인·수정, 재학습은 미실행) |
 | ML 모델 R² (xrd_nm, HistGBM) | **+0.0017** (MAE=10.62nm, n=3586) ← **32차** (거의 동일) |
 | ML 모델 R² (xrd_nm, LightGBM) | **+0.052** (MAE=10.41nm, n=3586) ← **34차 재실행** (31차 +0.077 대비 하락) |
-| ML 모델 R² (xrd_nm, CatBoost) | **+0.085** (MAE=10.22nm, n=3595) ← **32차** (31차 +0.062 대비 개선) |
+| ML 모델 R² (xrd_nm, CatBoost) | **+0.099** (MAE=10.20nm, n=3595) ← **34차 `--tune` 재탐색 완료** (32차 +0.085 대비 개선) |
 | unidentified_method 행 수 | **286행** (28차 Section 1c 77행 복구 — 26차 363행) |
 | ce_precursor Non-Ce 정제 | **214행 NULL 처리** (28차 Section 1d — 도펀트·식물추출물 등 오분류 제거) |
 | ce_precursor="CeO2" 오분류 | **12.3% → 3.5%** (32차 — 프롬프트 화이트리스트 버그 수정 + 의심값 재추출) |
@@ -174,10 +174,10 @@ ceria_pipeline_data/
 |------|--------|--------|------|------|---|---------|
 | HistGBM | **-0.050** | 28.88 | 67.31 | 9.37 | 4249 | **+0.013** |
 | LightGBM (12b) | +0.018 | 28.41 | 66.45 | 8.84 | 4249 | **34차 재실행, +0.002** |
-| CatBoost | **+0.107** | 26.96 | 66.29 | 8.42 | 4259 | **-0.016** (34차 `--tune` 재탐색 중) |
+| CatBoost | **+0.123** | 26.76 | 66.00 | 8.27 | 4259 | **34차 `--tune` 재탐색 완료, 32차 대비 +0.016** |
 | DKL-GP (inducing=512) | **+0.020** | **24.24** | 64.07 | 7.65 | 4249 | **-0.052** (34차: 시드 미고정 확인, 재학습 전) |
 
-> **34차 (2026-07-15)**: 32차 데이터로 LightGBM(12b)·LightGBM 역설계(12d_targeted_design) 재실행 —
+> **34차 (2026-07-15~16)**: 32차 데이터로 LightGBM(12b)·LightGBM 역설계(12d_targeted_design) 재실행 —
 > primary_nm log-R² +0.018(거의 동일), **xrd_nm +0.052(31차 +0.077 대비 하락)**. `audit_extraction_accuracy.py`
 > tier1 매칭 로직에 화학명↔화학식 동치 검사 추가(nitrate/chloride/sulfate/hexahydrate 등) →
 > ce_precursor flag **41.6%→23.4%**로 감소(표본 검토: 28건 중 11건 심층 확인, 10건이 "cerium nitrate
@@ -185,8 +185,11 @@ ceria_pipeline_data/
 > `12c_gpr_model.py`에 `torch.manual_seed(42)` 등 시드 고정 추가 — 기존 코드는 NN 초기화·유도점
 > 초기화·DataLoader 셔플이 전혀 시드 고정되지 않아 동일 데이터로도 재실행 시 log-R²가 크게 달라질 수
 > 있었음(val set n≈637로 작고 기저 R²도 0에 가까워 노이즈 민감도 높음) — 27차→32차 3연속 하락이 데이터
-> 품질 변화 때문인지 학습 노이즈 때문인지 분리 불가능했던 문제의 유력 원인. CatBoost `--tune` 32차
-> 데이터 재탐색 백그라운드 실행 중(완료 시 본 표 갱신 필요).
+> 품질 변화 때문인지 학습 노이즈 때문인지 분리 불가능했던 문제의 유력 원인.
+> **CatBoost `--tune` 32차 데이터 재탐색 완료** (60회, 실소요 9시간56분 — 트라이얼당 5~14분으로 예상보다
+> 오래 걸림): primary_nm **+0.107→+0.123**, xrd_nm **+0.085→+0.099** 둘 다 개선. 신규 best_params:
+> iterations=740, lr=0.02159, depth=6(29차 depth=9보다 얕음), l2_leaf_reg=2.169, random_strength=1.110,
+> bagging_temperature=1.545, border_count=254 — `catboost_best_params.json` 갱신됨.
 >
 > **32차 (2026-07-09~10, 커밋 885f6aa)**: `ce_precursor="CeO2"` 오분류 버그(프롬프트가 CeO2를 유효 전구체
 > 예시로 잘못 포함 — 최종 생성물명이 전구체로 오추출됨, 12.3%→3.5% 개선) + PDF 텍스트 손상(pdfplumber
@@ -215,7 +218,7 @@ ceria_pipeline_data/
 |------|------|------|---|------|
 | HistGBM | +0.002 | **+0.0017** | 3,586 | 거의 동일, n +165 (PDF 재추출 효과, 32차) |
 | LightGBM | +0.077 | **+0.052** | 3,586 | **34차 재실행 — 하락** (원인 미조사, n +165) |
-| CatBoost | +0.062 | **+0.085** | 3,595 | 개선, n +165 (32차) |
+| CatBoost | +0.062 | **+0.099** | 3,595 | **34차 `--tune` 재탐색 완료 — 개선** (32차 +0.085 대비 +0.014) |
 
 > **XRD 노이즈 필터 효과** (21차 기준): `12_model.py`에 `between(2, 150)` 필터 → 26차 72건 제거
 > 물리적 근거: Scherrer equation 유효 범위 2~150nm (< 2nm 불가, > 150nm Scherrer 한계 초과)
@@ -301,17 +304,15 @@ streamlit run 13_dashboard.py       # 대시보드 (http://localhost:8501)
 
 ### 다음 세션 시작 시
 
-34차 진행 중 (CatBoost `--tune` 백그라운드 실행 중 — 완료 시 재확인 필요). 33차(감사 도구 커밋) →
-34차(LightGBM 재실행·audit 매칭 개선·DKL-GP 시드 고정) 진행.
-- 성능 현황: HistGBM **-0.050**(32차) / LightGBM **+0.018**(34차 재실행) / CatBoost **+0.107**(32차, 재탐색 진행 중) / DKL-GP **+0.020**(32차, 재학습 전)
+34차 완료 (LightGBM 재실행·audit 매칭 개선·DKL-GP 시드 고정·CatBoost `--tune` 재탐색 전부 완료).
+- 성능 현황: HistGBM **-0.050**(32차) / LightGBM **+0.018**(34차 재실행) / CatBoost **+0.123**(34차 `--tune` 완료) / DKL-GP **+0.020**(32차, 재학습 아직 미실행)
 - 34차 완료: LightGBM(12b)·LightGBM 역설계(12d_targeted_design) 32차 데이터로 재실행 (xrd_nm +0.052로 하락, 원인 미조사)
 - 34차 완료: `audit_extraction_accuracy.py` 매칭 로직 개선 — ce_precursor flag 41.6%→**23.4%** (화학명↔화학식 동치 검사 추가)
-- 34차 완료: `12c_gpr_model.py`에 `torch.manual_seed(42)` 등 시드 고정 추가 — 기존 코드는 학습 재현성이 전혀 보장되지 않았음 (DKL-GP 하락의 유력 원인). **재학습은 미실행** — 다음 세션에서 우선 실행 권장
-- **진행 중(백그라운드)**: CatBoost `--tune` 32차 데이터 재탐색 (60회, 트라이얼당 ~5분 → 총 4~5시간 예상) — 완료 시 `12d_catboost_model.py` 재실행 + best_params.json 갱신 필요
-- CatBoost best_params.json은 6/28(29차) 탐색 결과 그대로 사용 중 — 34차에서 재탐색 시작함(위 항목)
-- GitHub: 33차까지 커밋(`b40ce1c1`)+34차 커밋 예정 — push는 여전히 CMD에서 `git push origin main` 실행 필요
+- 34차 완료: `12c_gpr_model.py`에 `torch.manual_seed(42)` 등 시드 고정 추가 — 기존 코드는 학습 재현성이 전혀 보장되지 않았음 (DKL-GP 하락의 유력 원인). **재학습은 아직 미실행** — 다음 세션에서 최우선 실행 권장 (미완료 항목 1번)
+- 34차 완료: CatBoost `--tune` 32차 데이터 재탐색 완료 (60회, 실소요 9시간56분 — 예상(2.5~3시간)보다 훨씬 오래 걸림, 트라이얼당 5~14분). primary_nm **+0.107→+0.123**, xrd_nm **+0.085→+0.099** 개선. `catboost_best_params.json` 갱신됨(depth 9→6)
+- GitHub: 34차 커밋 완료(`eeccdb2`, gitpython 우회) — push는 여전히 CMD에서 `git push origin main` 실행 필요 (origin 대비 3 commit ahead)
 - CatBoost segfault: 모델 저장 후 cleanup 단계에서 발생 — pkl 파일은 정상, 기능상 문제 없음 (지속 관찰 중)
-- DKL-GP log-R² 하락(+0.321(27차)→+0.072(31차)→+0.020(32차)) — 34차에서 원인을 "학습 시드 미고정"으로 특정, 코드 수정 완료. 재학습 후 재현성 확인 필요
+- DKL-GP log-R² 하락(+0.321(27차)→+0.072(31차)→+0.020(32차)) — 34차에서 원인을 "학습 시드 미고정"으로 특정, 코드 수정 완료. **재학습 후 재현성 확인이 다음 세션 최우선 과제**
 - `audit_extraction_accuracy.py` tier1 ce_precursor flag는 34차 매칭 개선으로 41.6%→23.4%까지 감소 — 잔여 23.4%도 상당수 추가 화학명 변형(예: 다른 어순의 ceric ammonium nitrate, 드문 수화물 표기) 과탐일 가능성, 완전 해소는 아님
 
 필요시 재학습:
@@ -825,18 +826,22 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 | **`audit_extraction_accuracy.py` tier1 ce_precursor 표본 검토** | 28건 무작위 표본 중 11건 원문 심층 대조 — 10건이 "cerium nitrate hexahydrate" 등 산문 화학명을 GPT가 정확한 화학식으로 변환한 것이 원인인 **과탐**, 1건만 실제 의심(합성 서술 없이 기성 nanoceria 사용 논문) |
 | **`_ce_precursor_alt_match()` 매칭 로직 추가** | 음이온(nitrate/chloride/sulfate/acetate/carbonate/oxalate/hydroxide/acetylacetonate)·수화물(mono~deca)·ammonium ceric nitrate 명칭↔화학식 동치 검사 → ce_precursor flag **41.6%→23.4%** (3,413→1,924건) |
 | **`12c_gpr_model.py` 랜덤 시드 고정** | `torch.manual_seed(42)` 등 추가 — 기존 코드는 NN/유도점 초기화·DataLoader 셔플이 전혀 시드 고정 안 돼 재현성 없었음. DKL-GP 27→32차 3연속 하락의 유력 원인으로 특정. **재학습은 미실행** |
-| **CatBoost `--tune` 32차 데이터 재탐색** (진행 중, 백그라운드) | 60회 Optuna 탐색, 트라이얼당 ~5분 → 총 4~5시간 예상. 완료 후 재확인 필요 |
+| **CatBoost `--tune` 32차 데이터 재탐색** (완료) | 60회 Optuna 탐색, 실소요 **9시간56분**(트라이얼당 5~14분, 예상보다 오래 걸림). primary_nm **+0.107→+0.123**, xrd_nm **+0.085→+0.099** 둘 다 개선. 신규 params: iterations=740, lr=0.0216, depth=6 (29차 depth=9보다 얕음) |
 | GitHub push | 미실행 (CMD 필요, 사용자 안내) |
 
 ---
 
 ## 미완료 항목 (우선순위 순)
 
-1. **[진행 중]** CatBoost `--tune` 32차 데이터 재탐색 완료 대기 — 백그라운드 실행 중(34차 시작, ~4~5시간 예상). 완료 시 `12d_catboost_model.py` 일반 재실행으로 best_params 반영 + 성능 재확인 필요.
-2. **[검증 필요]** DKL-GP 재학습 — 34차에 `torch.manual_seed(42)` 추가만 하고 재학습은 안 함. CatBoost 튜닝과 리소스 경합(메모리 OOM) 우려로 순차 실행 필요. 재학습 후 log-R²가 32차(+0.020)와 달라지는지 확인하면 "시드 미고정이 하락의 실제 원인"이라는 34차 가설을 검증 가능.
-3. **[조사]** LightGBM xrd_nm 34차 하락 원인 미조사 — 31차 +0.077 → 34차 +0.052. ce_precursor/PDF 텍스트 수정 후 n이 3,421→3,586로 늘었는데 왜 하락했는지 확인 필요 (fold별 분산 확인 권장).
-4. **[검토]** audit tier1 잔여 23.4% ce_precursor flag — 34차 매칭 개선 이후에도 남은 flag가 추가 화학명 변형(어순이 다른 ammonium cerium nitrate, 드문 수화물 표기 등) 때문인 과탐인지, 진짜 오류인지 추가 표본 검토 필요.
-5. **[저우선]** GitHub push — CMD에서 직접 실행 필요:
+1. **[검증 필요]** DKL-GP 재학습 — 34차에 `torch.manual_seed(42)` 추가만 하고 재학습은 안 함(CatBoost 튜닝과 리소스 경합 우려로 순서상 뒤로 미룸, 이제 CatBoost 튜닝은 완료됐으므로 다음 실행 가능). 재학습 후 log-R²가 32차(+0.020)와 달라지는지 확인하면 "시드 미고정이 하락의 실제 원인"이라는 34차 가설을 검증 가능.
+   ```bash
+   PYTHON="/c/Users/K10756/AppData/Local/anaconda3/envs/test/python.exe"
+   PYTHONIOENCODING=utf-8 PYTHONUNBUFFERED=1 "$PYTHON" 12c_gpr_model.py \
+     --target particle_size_primary_nm --inducing 512 --epochs 300
+   ```
+2. **[조사]** LightGBM xrd_nm 34차 하락 원인 미조사 — 31차 +0.077 → 34차 +0.052. ce_precursor/PDF 텍스트 수정 후 n이 3,421→3,586로 늘었는데 왜 하락했는지 확인 필요 (fold별 분산 확인 권장).
+3. **[검토]** audit tier1 잔여 23.4% ce_precursor flag — 34차 매칭 개선 이후에도 남은 flag가 추가 화학명 변형(어순이 다른 ammonium cerium nitrate, 드문 수화물 표기 등) 때문인 과탐인지, 진짜 오류인지 추가 표본 검토 필요.
+4. **[저우선]** GitHub push — CMD에서 직접 실행 필요:
    ```cmd
    cd "d:\머신러닝 교육\ceria_pipeline_data"
    git push origin main
