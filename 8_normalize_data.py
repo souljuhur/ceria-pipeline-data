@@ -10,10 +10,14 @@ normalize_data.py — [Stage 2] 데이터 정규화
 이전 이름: run_cell21.py
 """
 import json
+import sys
 import pandas as pd, os, re
 from pathlib import Path
 
 _BASE     = r"d:\머신러닝 교육\ceria_pipeline_data"
+sys.path.insert(0, _BASE)
+from src.normalize_rules import is_ce_compound, derive_anion, UNICODE_SUBSCRIPT_MAP as _UNICODE_SUB  # noqa: E402
+
 _PATH     = os.path.join(_BASE, "output", "ceria_synthesis_database.xlsx")
 _CSV_PATH = os.path.join(_BASE, "output", "ceria_samples_merged.csv")
 _TEXT_DIR = Path(_BASE) / "text"
@@ -481,33 +485,8 @@ if df_csv is not None and "synthesis_method" in df_csv.columns and "doi" in df_c
 # ── 1d. ce_precursor 검증 필터 — 非Ce 물질 제거 ─────────────────────────────
 # GPT가 도펀트 전구체(La/Ni/Zr 등), 지지체(TiO2/SnO2), 유기 첨가제를 혼동하여
 # ce_precursor에 잘못 기입하는 경우를 NULL로 처리한다.
-
-def _is_ce_compound(val) -> bool:
-    """Ce 원소를 실제로 포함하는 화합물이면 True."""
-    if pd.isna(val):
-        return False
-    s = str(val).strip().lower()
-    if not s or s in ("nan", "none", "null", "n/a", ""):
-        return False
-    # 세미콜론/쉼표로 분리해 각 성분 검사
-    parts = re.split(r"[;,]", s)
-    for p in parts:
-        p = p.strip()
-        if not p:
-            continue
-        # Ce로 시작하는 성분 (CeO2, Ce(NO3)3, CeCl3, CeH2.73, CeIII ... 모두 포함)
-        if re.match(r"ce", p, re.IGNORECASE):
-            return True
-        # cerium / cerous / ceric 단어 포함
-        if re.search(r"\b(cerium|cerous|ceric)\b", p, re.IGNORECASE):
-            return True
-        # (NH4)2Ce... 또는 (NH4)2[Ce... 형태
-        if re.search(r"\(nh4\)[\d\s]*\[?ce", p, re.IGNORECASE):
-            return True
-        # Ce를 원소로 포함하는 복합식: 앞뒤가 비문자인 Ce (예: La0.5Ce0.5O2)
-        if re.search(r"(?<![a-z])ce(?![a-z])", p, re.IGNORECASE):
-            return True
-    return False
+# is_ce_compound()는 src/normalize_rules.py로 이동 — 34차: "ce"로 시작만 해도
+# 통과되던 버그(cesium/CTAB/cellulose 오탐) 수정 + pytest 회귀 테스트 추가.
 
 if df_csv is not None and "ce_precursor" in df_csv.columns:
     ce_col = df_csv["ce_precursor"].copy()
@@ -515,7 +494,7 @@ if df_csv is not None and "ce_precursor" in df_csv.columns:
     for idx in df_csv.index:
         val = df_csv.at[idx, "ce_precursor"]
         if pd.notna(val) and str(val).strip() not in ("", "nan", "none"):
-            if not _is_ce_compound(val):
+            if not is_ce_compound(val):
                 df_csv.at[idx, "ce_precursor"] = None
                 nullified += 1
     print(f"\n  [ce_precursor 검증] 非Ce 물질 → NULL 처리: {nullified}행")
@@ -753,40 +732,12 @@ if "atmosphere" in df.columns:
         print(f"    {k:<20} {v:>5,}편")
 
 # ── 6. ce_precursor → anion_type 파생 피처 ───────────────────────────────────
-_UNICODE_SUB = str.maketrans("₀₁₂₃₄₅₆₇₈₉", "0123456789")
-
-ANION_PATTERNS = [
-    # ammonium_nitrate 먼저 — nitrate보다 우선
-    ("ammonium_nitrate", r"nh4.*no3|ammonium.*nitrate|\bcan\b|ceric ammonium|(nh4)2ce"),
-    ("nitrate",          r"no3|nitrate"),
-    ("chloride",         r"cecl|\bcl\d|chloride"),
-    ("acetate",          r"ch3coo|ch3co2|\boac\b|acetate"),
-    ("sulfate",          r"so4|sulfate"),
-    ("carbonate",        r"co3|carbonate"),
-    ("acetylacetonate",  r"acac|acetylacetonate"),
-    ("alkoxide",         r"oipr|oisop|\boet\b|omeo|isopropoxide|ethoxide|methoxide|butoxide|alkoxide"),
-    ("oxalate",          r"c2o4|oxalate"),
-    ("hydroxide",        r"ce\(oh\)|hydroxide"),
-    ("carboxylate",      r"octanoate|hexanoate|2-ethylhex|stearate|oleate|laurate|propanoate|formate"),
-    ("mof",              r"\bmof\b|btc\b|bdc\b|uio-|mil-|zif-"),
-    # oxide: CeO2 / CeO / CeZrO2 등 — 산화물계 출발 물질
-    ("oxide",            r"^ceo2$|^ceo$|cezro|\bcerium oxide\b|\bceria\b"),
-    # metal_ion: Ce 금속/이온 표기 (Ce, Ce3+, Ce(III), Ce(IV) 등)
-    ("metal_ion",        r"^ce$|^ce metal$|^ce\d?\+$|ce\(iii\)|ce\(iv\)|^ce3\+$|^ce4\+$"),
-]
-
-def _derive_anion(val):
-    if pd.isna(val) or not str(val).strip():
-        return None
-    # 유니코드 아래첨자 정규화 (₄→4, ₃→3 등)
-    v = str(val).strip().translate(_UNICODE_SUB).lower()
-    for anion, pat in ANION_PATTERNS:
-        if re.search(pat, v, re.I):
-            return anion
-    return "other"
+# derive_anion()/ANION_PATTERNS는 src/normalize_rules.py로 이동 — 34차: 필드 전체에
+# .*로 매칭하던 버그(무관한 두 성분이 한 셀에 있으면 ammonium_nitrate로 오분류,
+# 예: "NH4Cl; KNO3; Ce(SO4)2") 수정. 토큰(;/,) 단위로 쪼개 각 토큰 내부에서만 매칭.
 
 if "ce_precursor" in df.columns:
-    df["anion_type"] = df["ce_precursor"].apply(_derive_anion)
+    df["anion_type"] = df["ce_precursor"].apply(derive_anion)
     n_filled = df["anion_type"].notna().sum()
     dist = df["anion_type"].dropna().value_counts()
     print(f"\n  ce_precursor → anion_type 파생: {n_filled:,}편")

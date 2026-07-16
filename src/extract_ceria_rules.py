@@ -17,6 +17,23 @@ def normalize_text_basic(text: str) -> str:
     return text.strip()
 
 
+# 34차: 건조/소성처럼 한 문장에 여러 단계가 이어지는 경우("dried at 80C for 12h
+# and then calcined at 500C for 3h") 문장 전체에서 "첫 번째 숫자"만 뽑아 컨텍스트
+# 키워드 중 먼저 매칭된 것에 배정하면, 두 번째 단계(소성)에 첫 번째 단계(건조)의
+# 값이 잘못 들어간다 — extract_temperatures/extract_times(본 파일)와
+# extract_contextual_conditions(experiment_parser.py)에 동일한 구조로 있던 버그.
+# 절(clause) 단위로 먼저 쪼갠 뒤 각 절에 기존 로직을 적용하면, 절 안에 있는 숫자와
+# 키워드만 서로 매칭되므로 단계가 섞이지 않는다. 접속 표현이 없는 단일 문장은
+# 그대로 1개 절로 취급되어 기존 동작과 동일하다.
+_CLAUSE_SPLIT_RE = re.compile(r"\s*(?:,?\s*and\s+then\s+|,?\s*then\s+|;\s*)", re.I)
+
+
+def split_into_clauses(sentence: str) -> list:
+    """문장을 "and then"/"then"/";" 기준으로 절 단위로 분리."""
+    parts = _CLAUSE_SPLIT_RE.split(sentence)
+    return [p for p in parts if p.strip()]
+
+
 # ─── Synthesis method ─────────────────────────────────────────────────────────
 
 SYNTHESIS_METHOD_PATTERNS = [
@@ -329,17 +346,18 @@ def extract_temperatures(text: str) -> dict:
     }
 
     for sent in sentences:
-        temps = [float(m.group(1)) for m in _TEMP_RE.finditer(sent)]
-        if not temps:
-            continue
-        t = temps[0]
+        for clause in split_into_clauses(sent):
+            temps = [float(m.group(1)) for m in _TEMP_RE.finditer(clause)]
+            if not temps:
+                continue
+            t = temps[0]
 
-        if _CALC_CTX.search(sent) and result["calcination_temperature_c"] is None:
-            result["calcination_temperature_c"] = t
-        elif _DRY_CTX.search(sent) and result["drying_temperature_c"] is None:
-            result["drying_temperature_c"] = t
-        elif _SYNTH_CTX.search(sent) and result["synthesis_temperature_c"] is None:
-            result["synthesis_temperature_c"] = t
+            if _CALC_CTX.search(clause) and result["calcination_temperature_c"] is None:
+                result["calcination_temperature_c"] = t
+            elif _DRY_CTX.search(clause) and result["drying_temperature_c"] is None:
+                result["drying_temperature_c"] = t
+            elif _SYNTH_CTX.search(clause) and result["synthesis_temperature_c"] is None:
+                result["synthesis_temperature_c"] = t
 
     return result
 
@@ -379,17 +397,18 @@ def extract_times(text: str) -> dict:
     }
 
     for sent in sentences:
-        matches = [(float(m.group(1)), m.group(2)) for m in _TIME_RE.finditer(sent)]
-        if not matches:
-            continue
-        t = _to_hours(*matches[0])
+        for clause in split_into_clauses(sent):
+            matches = [(float(m.group(1)), m.group(2)) for m in _TIME_RE.finditer(clause)]
+            if not matches:
+                continue
+            t = _to_hours(*matches[0])
 
-        if _CALC_CTX.search(sent) and result["calcination_time_h"] is None:
-            result["calcination_time_h"] = t
-        elif _DRY_CTX.search(sent) and result["drying_time_h"] is None:
-            result["drying_time_h"] = t
-        elif _SYNTH_CTX.search(sent) and result["synthesis_time_h"] is None:
-            result["synthesis_time_h"] = t
+            if _CALC_CTX.search(clause) and result["calcination_time_h"] is None:
+                result["calcination_time_h"] = t
+            elif _DRY_CTX.search(clause) and result["drying_time_h"] is None:
+                result["drying_time_h"] = t
+            elif _SYNTH_CTX.search(clause) and result["synthesis_time_h"] is None:
+                result["synthesis_time_h"] = t
 
     return result
 

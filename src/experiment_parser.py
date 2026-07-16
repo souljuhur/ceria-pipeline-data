@@ -1,6 +1,6 @@
 import re
 
-from src.extract_ceria_rules import extract_ceria_fields_from_text, normalize_text_basic
+from src.extract_ceria_rules import extract_ceria_fields_from_text, normalize_text_basic, split_into_clauses
 from src.quantity_extractor import (
     extract_quantities,
     extract_ratios,
@@ -62,10 +62,12 @@ def parse_time_to_hours(value, unit):
 
 
 def extract_contextual_conditions(sentence: str):
+    """34차: 건조/소성이 한 문장에 같이 나오면("dried at 80C ... and then
+    calcined at 500C ...") 절(clause) 단위로 나눠서 각각 판정 — 그렇지 않으면
+    문장 전체의 첫 숫자가 먼저 매칭된 컨텍스트(소성이 if문에서 먼저 검사됨)에
+    잘못 배정된다. extract_ceria_rules.py의 extract_temperatures/extract_times와
+    동일한 버그였음(사실상 같은 로직의 중복 구현)."""
     sentence = normalize_text_basic(sentence)
-
-    temps = [float(m.group(1)) for m in TEMP_PATTERN.finditer(sentence)]
-    times = [parse_time_to_hours(m.group(1), m.group(2)) for m in TIME_PATTERN.finditer(sentence)]
 
     out = {
         "synthesis_temperature_c": None,
@@ -76,21 +78,25 @@ def extract_contextual_conditions(sentence: str):
         "calcination_time_h": None
     }
 
-    if has_any(CALCINATION_CONTEXT, sentence):
-        if temps:
-            out["calcination_temperature_c"] = temps[0]
-        if times:
-            out["calcination_time_h"] = times[0]
-    elif has_any(DRYING_CONTEXT, sentence):
-        if temps:
-            out["drying_temperature_c"] = temps[0]
-        if times:
-            out["drying_time_h"] = times[0]
-    elif has_any(SYNTHESIS_CONTEXT, sentence):
-        if temps:
-            out["synthesis_temperature_c"] = temps[0]
-        if times:
-            out["synthesis_time_h"] = times[0]
+    for clause in split_into_clauses(sentence):
+        temps = [float(m.group(1)) for m in TEMP_PATTERN.finditer(clause)]
+        times = [parse_time_to_hours(m.group(1), m.group(2)) for m in TIME_PATTERN.finditer(clause)]
+
+        if has_any(CALCINATION_CONTEXT, clause):
+            if temps and out["calcination_temperature_c"] is None:
+                out["calcination_temperature_c"] = temps[0]
+            if times and out["calcination_time_h"] is None:
+                out["calcination_time_h"] = times[0]
+        elif has_any(DRYING_CONTEXT, clause):
+            if temps and out["drying_temperature_c"] is None:
+                out["drying_temperature_c"] = temps[0]
+            if times and out["drying_time_h"] is None:
+                out["drying_time_h"] = times[0]
+        elif has_any(SYNTHESIS_CONTEXT, clause):
+            if temps and out["synthesis_temperature_c"] is None:
+                out["synthesis_temperature_c"] = temps[0]
+            if times and out["synthesis_time_h"] is None:
+                out["synthesis_time_h"] = times[0]
 
     return out
 
@@ -230,7 +236,12 @@ def parse_experiment_block(block_text: str, experiment_id: str = None):
 
     result = {}
     result.update(base)
-    result.update(cond)
+    # 34차: dict.update()는 cond의 None까지 덮어써서 base가 이미 정확히 찾아둔 값을
+    # 지워버릴 수 있었음(예: cond가 문장 분리 방식이 달라 base보다 못 찾는 경우) —
+    # None이 아닌 값만 덮어써서 base/cond 중 하나라도 찾은 값은 보존한다.
+    for k, v in cond.items():
+        if v is not None:
+            result[k] = v
     result.update(dopants)
 
     result["experiment_id"] = experiment_id

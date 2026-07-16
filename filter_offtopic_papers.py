@@ -46,13 +46,20 @@ def clean_html(text: str) -> str:
 
 
 # ── 세리아 키워드 (Title/Abstract) ────────────────────────────────────────────
+# 34차: "ceric"/"cerous"(Ce4+/Ce3+ 화학명 표기) 누락 발견 — 이 표기만 쓰는 논문이
+# 잘못 제거될 위험이 있어 추가. 백업 파일로 실제 영향 검증: 3,307건 제거 중 이
+# 표기 부재로 인한 오제거는 0건(단어경계 없이 검증했을 때 나온 8건 후보는 전부
+# "glyceric acid" 등 무관 단어의 부분문자열 오탐이었고, 단어경계를 넣은 뒤 남은
+# 2건도 세리아 나노입자 합성과 무관한 논문으로 확인). 실제 손실은 없었지만
+# 향후 재수집 시를 위해 방어적으로 추가 — 단어경계(\b) 필수(glyceric 등 오탐 방지).
 CERIA_META = re.compile(
     r"ceria|nanoceria|CeO\s*2|cerium.dioxide|cerium.oxide|Ce2O3"
     r"|cerium.nanopart|cerium.precursor|cerium.nitrate|cerium.chloride"
     r"|cerium.acetate|cerium.carbonate|cerium.hydroxide|cerium.sulfate"
     r"|cerium\s*\(IV\)|cerium\s*\(III\)|SDC\b|GDC\b|YDC\b"
     r"|samarium.doped.ceria|gadolinium.doped.ceria|yttrium.doped.ceria"
-    r"|CeZr|Ce\d*Zr\d*O|Ce\s*0\.[0-9]|CeO₂|Ce₂O₃",
+    r"|CeZr|Ce\d*Zr\d*O|Ce\s*0\.[0-9]|CeO₂|Ce₂O₃"
+    r"|\bceric\b|\bcerous\b",
     re.IGNORECASE,
 )
 
@@ -64,8 +71,10 @@ CERIA_PRECURSOR = re.compile(
     r"|CeCl3|Ce\s*Cl\b|cerium\s+chloride"
     r"|Ce\s*\(\s*CH3COO\s*\)|cerium\s+acetate"
     r"|Ce2\s*\(\s*SO4\s*\)|cerium\s+sulfate"
-    r"|Ce\s*\(\s*OH\s*\)|cerium\s+carbonate"
-    r"|Ce2O3|Ce\s*O\s*2\b",
+    r"|Ce\s*\(\s*OH\s*\)|cerium\s+hydroxide|cerium\s+carbonate"
+    r"|Ce2O3|Ce\s*O\s*2\b"
+    r"|\bceric\s+(?:nitrate|chloride|sulfate|ammonium)\b"
+    r"|\bcerous\s+(?:nitrate|chloride|sulfate|acetate|carbonate|hydroxide|oxalate)\b",
     re.IGNORECASE,
 )
 

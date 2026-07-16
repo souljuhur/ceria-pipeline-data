@@ -6,9 +6,16 @@ iterrows() 루프 → pandas 벡터 연산으로 구현. 4,388편 기준 수 초
 
 이전 이름: run_cell17.py
 """
+import sys
 import pandas as pd, os, re, numpy as np
 
-_output_path = os.path.join(r"d:\머신러닝 교육\ceria_pipeline_data", "output", "ceria_synthesis_database.xlsx")
+_BASE = r"d:\머신러닝 교육\ceria_pipeline_data"
+sys.path.insert(0, _BASE)
+from src.normalize_rules import (  # noqa: E402
+    DOPANT_SYMBOLS, dopant_symbol_pattern, CE_PRECURSOR_FULLTEXT_KW,
+)
+
+_output_path = os.path.join(_BASE, "output", "ceria_synthesis_database.xlsx")
 
 
 def _load_xlsx_safe(path):
@@ -25,9 +32,13 @@ total = len(df)
 print(f"보완 시작: {total:,}편\n")
 
 # ── 공통 haystack (title + abstract 소문자 결합) ─────────────────────────────
-_hay = (df["title"].fillna("") + " " +
-        (df["abstract"].fillna("") if "abstract" in df.columns
-         else pd.Series("", index=df.index))).str.lower()
+_hay_raw = (df["title"].fillna("") + " " +
+            (df["abstract"].fillna("") if "abstract" in df.columns
+             else pd.Series("", index=df.index)))
+_hay = _hay_raw.str.lower()
+# 34차: 도핑 원소기호(Co/In 등)는 대소문자를 보존해야 "co-doped"(=공동 도핑,
+# 코발트 아님)/전치사 "in"과 구분 가능 — 전부 소문자로 낮춘 _hay로는 구분 불가.
+_hay_cased = _hay_raw
 
 def _null_mask(col: str) -> pd.Series:
     """해당 컬럼이 비어있는 행 마스크."""
@@ -192,25 +203,15 @@ print(f"  BET 표면적 추가:     {filled_bet:,}편")
 
 
 # ── 4. 도핑 원소 ───────────────────────────────────────────────────────────────
-DOPANTS = [
-    # 희토류
-    "Sm", "Gd", "La", "Y", "Pr", "Nd", "Eu", "Tb", "Dy",
-    "Ho", "Er", "Yb", "Lu", "Sc", "In",
-    # 전이금속
-    "Zr", "Ti", "Cu", "Fe", "Co", "Ni", "Mn", "Cr", "V", "Nb", "W", "Mo",
-    "Ru", "Ag",
-    # 귀금속
-    "Pt", "Pd", "Au",
-    # 준금속/기타
-    "Al", "Si", "Bi", "Sn", "Mg", "Ca", "Sr", "Ba",
-]
-
+# DOPANTS/패턴은 src/normalize_rules.py로 이동 — 34차: 대소문자 무시 매칭이 "Co"를
+# "co-doped"(공동 도핑)에, "In"을 전치사 "in"에 잘못 매칭시키던 버그 수정.
+# _hay_cased(대소문자 보존)에 case=True로 매칭해야 원소기호만 구분해서 잡힘.
 orig_empty_dopant = _null_mask("dopant")
 filled_dopant = 0
-for d in DOPANTS:
-    pat = rf'\b{d}(?:-doped|doped|/CeO2|[- ]doped\s+ceri|[- ]doped\s+ceo)'
+for d in DOPANT_SYMBOLS:
+    pat = dopant_symbol_pattern(d)
     still_empty = _null_mask("dopant") & orig_empty_dopant
-    matches = _hay.str.contains(pat, case=False, na=False, regex=True)
+    matches = _hay_cased.str.contains(pat, case=True, na=False, regex=True)
     mask = still_empty & matches
     df.loc[mask, "dopant"] = d
     filled_dopant += mask.sum()
@@ -508,38 +509,10 @@ def _load_exp_text(doi: str) -> str:
     return full[start: start + 5000]
 
 
-CE_PRECURSOR_KW = [
-    ("Ce(NO3)3·6H2O",  ["ce(no3)3", "cerium(iii) nitrate", "cerium nitrate hexahydrate",
-                         "cerium nitrate", "cerous nitrate", "ceric nitrate"]),
-    ("Ce(NO3)4",       ["ce(no3)4", "cerium(iv) nitrate"]),
-    ("(NH4)2Ce(NO3)6", ["(nh4)2ce(no3)6", "ceric ammonium nitrate",
-                         "ammonium cerium(iv) nitrate", "ammonium cerium nitrate",
-                         "ammonium ceric nitrate", " can "]),
-    ("CeCl3·7H2O",     ["cecl3", "cerium(iii) chloride", "cerium chloride heptahydrate",
-                         "cerium chloride", "cerous chloride"]),
-    ("Ce(CH3COO)3",    ["ce(ch3coo)3", "ce(oac)3", "cerium(iii) acetate",
-                         "cerium acetate hydrate", "cerium acetate", "cerous acetate"]),
-    ("Ce(acac)3",      ["ce(acac)3", "cerium(iii) acetylacetonate",
-                         "cerium tris(acetylacetonate)", "cerium acetylacetonate"]),
-    ("Ce(acac)4",      ["ce(acac)4", "cerium(iv) acetylacetonate"]),
-    ("Ce(SO4)2",       ["ce(so4)2", "ceric sulfate", "cerium(iv) sulfate"]),
-    ("Ce2(SO4)3",      ["ce2(so4)3", "cerous sulfate", "cerium(iii) sulfate"]),
-    ("Ce2(CO3)3",      ["ce2(co3)3", "cerium(iii) carbonate", "cerium carbonate",
-                         "cerous carbonate"]),
-    ("Ce(OiPr)4",      ["cerium isopropoxide", "cerium(iv) isopropoxide",
-                         "cerium tetraisopropoxide", "cerium propoxide"]),
-    ("Ce(OBu)4",       ["cerium n-butoxide", "cerium butoxide", "cerium(iv) butoxide",
-                         "cerium tert-butoxide", "ce(obu)4"]),
-    ("Ce(OEt)4",       ["cerium ethoxide", "cerium(iv) ethoxide", "ce(oet)4"]),
-    ("Ce2(C2O4)3",     ["cerium(iii) oxalate", "cerium oxalate", "cerous oxalate",
-                         "ce2(c2o4)3"]),
-    ("Ce(OH)3",        ["ce(oh)3", "cerium(iii) hydroxide", "cerous hydroxide",
-                         "cerium hydroxide"]),
-    ("Ce(TMHD)3",      ["ce(tmhd)3", "cerium 2,2,6,6-tetramethyl",
-                         "cerium heptanedionate"]),
-    ("CeO2",           ["ceo2 starting material", "cerium oxide as precursor",
-                         "starting from ceo2"]),
-]
+# CE_PRECURSOR_KW는 src/normalize_rules.py의 CE_PRECURSOR_FULLTEXT_KW로 이동 —
+# 34차: "(NH4)2Ce(NO3)6" 항목의 `" can "` 키워드가 영어 조동사 "can"과 충돌해
+# 무관한 논문에 잘못 채워질 수 있던 버그 수정(해당 키워드 제거).
+CE_PRECURSOR_KW = CE_PRECURSOR_FULLTEXT_KW
 
 SOLVENT_KW = [
     ("water",            ["deionized water", "distilled water", "d.i. water", "di water",

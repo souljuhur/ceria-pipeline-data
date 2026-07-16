@@ -71,11 +71,18 @@ ceria_pipeline_data/
 │
 │  ── 공통 라이브러리 ────────────────────────────────────────────────
 ├── src/
-│   ├── extract_ceria_rules.py
-│   ├── experiment_parser.py
-│   ├── ceria_dictionary.py
-│   ├── dopant_dictionary.py
-│   └── quantity_extractor.py
+│   ├── extract_ceria_rules.py    ⚠️ 35차 확인: 파이프라인 미사용 죽은 코드 (GPT 추출로 대체됨)
+│   ├── experiment_parser.py      ⚠️ 상동 — extract_ceria_rules.py를 감싸는 모듈, 마찬가지로 미사용
+│   ├── ceria_dictionary.py       ⚠️ 상동
+│   ├── dopant_dictionary.py      ⚠️ 상동
+│   ├── quantity_extractor.py     ⚠️ 상동
+│   └── normalize_rules.py        35차 신규 — 8_normalize_data.py/6_fill_keywords.py 공용 순수 매칭 로직 (테스트 가능)
+│
+│  ── 테스트 (tests/) ────────────────────────────────────────────────
+├── tests/                        35차 신규 — 프로젝트 최초 pytest. `python -m pytest tests/ -v`
+│   ├── test_normalize_rules.py
+│   ├── test_filter_offtopic_papers.py
+│   └── test_temperature_time_extraction.py
 │
 │  ── 데이터 정제 ─────────────────────────────────────────────────────
 ├── filter_offtopic_papers.py    非세리아 논문 정밀 필터링 (23차 신규)
@@ -139,7 +146,7 @@ ceria_pipeline_data/
 
 ---
 
-## 현재 진행 상황 (2026-07-16 기준 — 34차 세션 완료)
+## 현재 진행 상황 (2026-07-16 기준 — 35차 세션 완료)
 
 > ⚠️ **논문 수집 중단**: 0_collect.py, 0_merge_new.py, run_weekly.py — 별도 지시 전까지 실행 금지
 
@@ -153,12 +160,12 @@ ceria_pipeline_data/
 | 1차 입자크기 커버리지 (TEM+SEM) | **48.4%** (4,249/8,819 valid rows) ← 26차 |
 | crystallite_size_xrd_nm 샘플 수 | **n=3,586~3,595** (32차 재추출 후 — 29차 3,421 → +165, 모델별 상이) |
 | ML 모델 피처 수 | **33개** (21 수치 + **12 범주형**) |
-| ML 모델 R² (primary_nm, HistGBM) | **-0.050** (MAE=28.88nm, n=4249) ← **32차** (31차 -0.063 대비 개선) |
-| ML 모델 R² (primary_nm, LightGBM) | **+0.018** (MAE=28.41nm, n=4249) ← **34차 재실행** (31차 +0.016 대비 거의 동일) |
+| ML 모델 R² (primary_nm, HistGBM) | **-0.050** (MAE=28.88nm, n=4249) ← **35차 재실행**(32차 값과 동일 — Phase1 버그 수정 영향 행 수가 적어 지표에 반영 안 됨) |
+| ML 모델 R² (primary_nm, LightGBM) | **+0.018** (MAE=28.41nm, n=4249) ← **35차 재실행**(34차 값과 동일, 상동) |
 | ML 모델 R² (primary_nm, CatBoost) | **+0.123** (MAE=26.76nm, n=4259) ← **34차 `--tune` 재탐색 완료** (32차 +0.107 대비 개선, 60회 탐색·9시간56분) |
 | ML 모델 R² (primary_nm, DKL-GP) | **+0.072** (MAE=24.70nm, PICP=0.821, n=4249) ← **34차 재학습**(시드 고정 후) — 32차 +0.020 대비 큰 폭 회복, 31차(+0.072)와 거의 동일값 |
-| ML 모델 R² (xrd_nm, HistGBM) | **+0.0017** (MAE=10.62nm, n=3586) ← **32차** (거의 동일) |
-| ML 모델 R² (xrd_nm, LightGBM) | **+0.052** (MAE=10.41nm, n=3586) ← **34차 재실행** (31차 +0.077 대비 하락) |
+| ML 모델 R² (xrd_nm, HistGBM) | **+0.002** (MAE=10.62nm, n=3586) ← **35차 재실행**(32차 값과 거의 동일) |
+| ML 모델 R² (xrd_nm, LightGBM) | **+0.052** (MAE=10.41nm, n=3586) ← **35차 재실행**(34차 값과 동일) |
 | ML 모델 R² (xrd_nm, CatBoost) | **+0.099** (MAE=10.20nm, n=3595) ← **34차 `--tune` 재탐색 완료** (32차 +0.085 대비 개선) |
 | unidentified_method 행 수 | **286행** (28차 Section 1c 77행 복구 — 26차 363행) |
 | ce_precursor Non-Ce 정제 | **214행 NULL 처리** (28차 Section 1d — 도펀트·식물추출물 등 오분류 제거) |
@@ -167,6 +174,8 @@ ceria_pipeline_data/
 | 추출 정확도 감사 (33차, tier2 GPT 20편) | 14건 flag → 원문대조 결과 **13건 오탐**(감사관 자기모순/과탐), 실제 이슈 후보 1건(다중조건 논문 값 혼선) |
 | 추출 필드 수 | **15개** (29차: synthesis_time_h·morphology 추가) |
 | Excel 열 수 | **48열** (11_format_excel.py 기준) |
+| 자동화 테스트 | **43건** (35차 신규 — 프로젝트 최초의 pytest 회귀 테스트, `tests/` + `src/normalize_rules.py`) |
+| src/extract_ceria_rules.py·experiment_parser.py | **35차 확인: 현재 파이프라인 어디서도 호출 안 되는 죽은 코드** (2_extract.py/4_extract_targeted.py의 GPT 추출로 대체됨) — 버그는 수정·테스트했으나 실 데이터 영향 없음 |
 
 ### 최신 모델 성능 비교 (32차 기준, particle_size_primary_nm)
 
@@ -322,17 +331,16 @@ streamlit run 13_dashboard.py       # 대시보드 (http://localhost:8501)
 
 ### 다음 세션 시작 시
 
-34차 완료 (LightGBM 재실행·audit 매칭 개선·DKL-GP 시드 고정+재학습·CatBoost `--tune` 재탐색 전부 완료).
-- 성능 현황: HistGBM **-0.050**(32차) / LightGBM **+0.018**(34차 재실행) / CatBoost **+0.123**(34차 `--tune` 완료) / DKL-GP **+0.072**(34차 재학습)
-- 34차 완료: LightGBM(12b)·LightGBM 역설계(12d_targeted_design) 32차 데이터로 재실행 (xrd_nm +0.052로 하락 — 원인 규명 완료: GroupKFold 20시드 재검증 결과 스프레드 0.084로 데이터 품질 문제 아닌 fold 구성 노이즈로 결론)
-- 34차 완료: `audit_extraction_accuracy.py` 매칭 로직 3차 개선 — ce_precursor flag 41.6%→**13.0%** (화학명↔화학식 동치·수화물 완화·ammonium ceric nitrate 어순대응). 재검토 중 실제 오류 후보 3~4건 발견(미완료 항목 1번)
-- 34차 완료: `12c_gpr_model.py`에 `torch.manual_seed(42)` 등 시드 고정 추가 + DKL-GP 재학습 → log-R²=**+0.072**(32차 +0.020 대비 회복, 31차 +0.072와 거의 동일). **결론: 27→32차 3연속 하락은 데이터 품질 저하가 아니라 학습 시드 미고정으로 인한 노이즈였을 가능성이 매우 높음**
-- 34차 완료: CatBoost `--tune` 32차 데이터 재탐색 완료 (60회, 실소요 9시간56분 — 예상(2.5~3시간)보다 훨씬 오래 걸림, 트라이얼당 5~14분). primary_nm **+0.107→+0.123**, xrd_nm **+0.085→+0.099** 개선. `catboost_best_params.json` 갱신됨(depth 9→6)
-- GitHub: 34차 커밋 완료(`eeccdb2`, `a465354`, gitpython 우회) — push는 여전히 CMD에서 `git push origin main` 실행 필요 (origin 대비 여러 commit ahead)
+35차 완료 (파이프라인 전체 리뷰 + pytest 테스트 인프라 도입 + 5건 버그 수정 + Stage3 재실행).
+- **신규: `tests/` + `src/normalize_rules.py`** — 프로젝트 최초의 pytest 테스트(43건, 전부 통과). `python -m pytest tests/ -v`로 실행. 8_normalize_data.py/6_fill_keywords.py는 import 시 즉시 Excel을 읽고 쓰는 구조라 직접 테스트 불가 — 순수 매칭 로직만 `src/normalize_rules.py`로 분리해 테스트 가능하게 만듦.
+- **중요 발견**: `src/extract_ceria_rules.py`/`src/experiment_parser.py`/`src/ceria_dictionary.py`/`src/dopant_dictionary.py`/`src/quantity_extractor.py`는 현재 파이프라인의 어떤 스크립트에서도 호출되지 않는 **죽은 코드**(2_extract.py/4_extract_targeted.py의 GPT 추출로 대체됨). 이 안의 버그는 고치고 테스트도 붙였지만 실 데이터에는 영향 없음 — 다음에 이 사실을 잊고 "고쳤는데 왜 성능이 안 바뀌지" 헛수고하지 말 것.
+- 35차 완료: 치명적 버그 4건 수정 (is_ce_compound cesium/CTAB 오탐, derive_anion 무관성분 걸친 매칭, dopant Co/In vs co-doped/전치사 in, ce_precursor 키워드 " can " 조동사 충돌) — `src/normalize_rules.py`로 이동 후 8_normalize_data.py/6_fill_keywords.py에서 import
+- 35차 완료: filter_offtopic_papers.py ceric/cerous 데이터손실 위험 — 백업 파일로 실측한 결과 **실제 손실 0건**. 방어적으로만 수정.
+- 35차 완료: Stage 3+4 재실행(`main.py --reset --from 3`) + LightGBM 재실행 — ce_precursor 검증 6행 신규 NULL 처리됐지만, HistGBM/LightGBM primary_nm·xrd_nm 지표는 **32~34차 값과 거의 동일**(영향받는 행 수가 적어 지표에 아직 안 드러남 — 버그는 실재했고 고쳐졌지만 크기가 작았던 것으로 판단, 추가 조사 불필요)
+- 성능 현황(변동 없음): HistGBM **-0.050** / LightGBM **+0.018**(primary) · **+0.052**(xrd) / CatBoost **+0.123**(primary, 34차 `--tune`) · **+0.099**(xrd) / DKL-GP **+0.072**(34차 재학습)
+- GitHub: 35차 커밋 예정 — push는 여전히 CMD에서 `git push origin main` 실행 필요 (Bash로 시도 시 auto mode classifier가 차단함 — 사용자가 CMD 전용으로 지정한 경계)
 - CatBoost segfault: 모델 저장 후 cleanup 단계에서 발생 — pkl 파일은 정상, 기능상 문제 없음 (지속 관찰 중)
-- **34차 핵심 결론**: DKL-GP(+0.020→+0.072, 시드 미고정)와 LightGBM xrd_nm(+0.052, fold 구성 민감도) 둘 다 "27~34차 성능 하락"이 실제 데이터 품질 저하가 아니라 **평가 방법의 노이즈**였음을 시사. 향후 세션 간 성능 비교 시 log-R² 델타가 ~0.05 미만이면 노이즈 가능성을 먼저 의심할 것 (특히 crystallite_size_xrd_nm, 소규모·약신호 타겟)
-- `audit_extraction_accuracy.py` tier1 ce_precursor flag는 34차 매칭 로직 4단계 개선(근접 매칭+화학명 트리거 확장 포함)으로 41.6%→**13.0%**까지 감소(3,413→1,067건). 잔여 표본 재검토에서 실제 오류 후보 3~4건 확인 — 다음 세션 1번 항목으로 개별 확인 필요
-- 대시보드 사이드바 브랜딩을 그라디언트 카드 스타일로 개선(`13_dashboard.py`), `dashboard.bat`+데스크탑 바로가기 추가 — 사용자 편의 기능, 파이프라인 로직과 무관
+- 백로그(미완료 항목 2~3번): `src/dopant_dictionary.py`/`src/ceria_dictionary.py`의 남은 버그들은 죽은 코드라 긴급하지 않음. `4_extract_targeted.py` ce_precursor 프롬프트에 `2_extract.py`식 이름↔화학식 동의어 안내 추가 여부는 검토 필요.
 
 필요시 재학습:
 
@@ -679,6 +687,12 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 
 | 세션 | 파일 | 버그 | 수정 |
 |------|------|------|------|
+| 35차 | **8_normalize_data.py** | `_is_ce_compound()`가 `re.match(r"ce", p, re.IGNORECASE)`로 "ce"로 시작만 해도 통과 — "cesium chloride"(세슘)·"cetyltrimethylammonium bromide"(CTAB)·"cellulose acetate"를 세륨 화합물로 오인, ce_precursor 검증 필터를 무력화 | `src/normalize_rules.py`로 이동 + `[Cc][Ee](?![a-z])` 대소문자 보존 검사로 교체 — 원소기호(대문자 시작)와 영단어(소문자 이어짐) 구분 |
+| 35차 | **8_normalize_data.py** | `_derive_anion()`의 `ammonium_nitrate` 패턴이 필드 전체에 `.*`로 매칭 — "NH4Cl; KNO3; Ce(SO4)2"처럼 세미콜론으로 구분된 무관한 두 성분에 걸쳐 매칭되어 오분류 | `src/normalize_rules.py`로 이동 + 토큰(;/,) 단위로 쪼개 각 토큰 내부에서만 매칭 |
+| 35차 | **6_fill_keywords.py** | 도핑원소 매칭이 haystack을 전부 소문자로 낮춘 뒤 `case=False`로 검사 — "Co"(코발트)가 "co-doped"(공동 도핑 접두사)에, "In"(인듐)이 전치사 "in"에 오매칭 | `src/normalize_rules.py`의 `dopant_symbol_pattern()`으로 이동 — 원소기호만 대소문자 구분(`case=True`), 나머지("doped" 등)는 대소문자 무관 |
+| 35차 | **6_fill_keywords.py** | `CE_PRECURSOR_KW`의 "(NH4)2Ce(NO3)6" 항목에 있던 `" can "` 키워드가 영어 조동사 "can"과 충돌 — 무관한 논문에 ammonium ceric nitrate를 잘못 채울 위험 | `src/normalize_rules.py`의 `CE_PRECURSOR_FULLTEXT_KW`로 이동, `" can "` 제거 |
+| 35차 | **filter_offtopic_papers.py** | `CERIA_META`/`CERIA_PRECURSOR`가 "ceric"/"cerous"(Ce4+/Ce3+ 화학명) 표기를 인식 못함 — 이 표기만 쓰는 논문이 오제거될 위험. 백업 파일로 실측: 3,307건 제거 중 실제 영향 **0건**(표본 8건 확인 결과 전부 세리아와 무관하거나 "glyceric acid" 등 무관 단어의 부분문자열 오탐) | `\bceric\b`/`\bcerous\b`(단어경계 필수) 방어적 추가 + `Ce(OH)` 포뮬러 옆 "cerium carbonate"(다른 화합물) 복붙 실수를 "cerium hydroxide"로 수정 |
+| 35차 | **src/extract_ceria_rules.py**, **src/experiment_parser.py** | `extract_temperatures`/`extract_times`/`extract_contextual_conditions`가 문장 전체에서 "첫 번째 숫자"만 뽑아 먼저 매칭된 컨텍스트에 배정 — "dried at 80C ... and then calcined at 500C ..." 같은 문장에서 건조값이 소성 필드에 잘못 들어감. (35차 확인: 이 모듈은 현재 파이프라인 어디서도 호출되지 않는 죽은 코드라 실 데이터 영향은 없음) | `split_into_clauses()` 공용 헬퍼 추가 — "and then"/"then"/";" 기준으로 절을 나눈 뒤 절 단위로 기존 로직 적용. `parse_experiment_block()`의 `result.update(cond)`가 `cond`의 None으로 `base`의 정상값을 지우던 버그도 함께 수정(None이 아닌 값만 덮어쓰기) |
 | 34차 | **12c_gpr_model.py** | `torch.manual_seed` 등 랜덤 시드 미고정 — NN 초기화·유도점 초기화·DataLoader 셔플이 매 실행마다 달라져 동일 데이터로도 log-R²가 크게 변동, 세션 간 성능 비교가 데이터 변화 때문인지 학습 노이즈 때문인지 구분 불가 | `torch.manual_seed(42)` + `np.random.seed(42)` + `torch.cuda.manual_seed_all(42)` 추가 |
 | 34차 | **audit_extraction_accuracy.py** | Tier1 `_value_found_in_text()`가 화학식 리터럴 문자열만 대조 — 논문이 "cerium nitrate hexahydrate"처럼 산문 화학명으로 서술하면 GPT가 정확히 표준 화학식으로 변환해도 과탐(false positive) 발생 (ce_precursor flag 41.6%) | `_ce_precursor_alt_match()` 4단계 개선 — ① 음이온(nitrate/chloride/sulfate 등) 명칭 동치 검사(41.6%→23.4%) ② 수화물(hexahydrate 등) 불일치를 실패조건에서 제외(23.4%→14.5%) ③ ammonium ceric nitrate 어순 다양성 대응: 전체문서 AND 체크 대신 60자 이내 근접 매칭(proximity)으로 교체해 무관한 두 시약의 우연한 동시등장 오통과 방지 ④ 트리거를 화학식 표기뿐 아니라 GPT의 화학명 추출("Ce(IV) ammonium nitrate")까지 확장 + Hill식(H8CeN8O18) 별도 매칭 → 최종 **13.0%** (1,067건) |
 | 32차 | **2_extract.py**, **4_extract_targeted.py** | ce_precursor 스키마 설명에 `CeO2`를 유효 전구체 예시로 포함 — 논문 전체에서 계속 언급되는 최종 생성물명(CeO2)이 시작 시약으로 오추출됨 (ML 데이터셋 12.3% 영향) | 스키마 예시에서 `CeO2` 제거, "CeO2를 기본값으로 추측하지 말 것" 경고 추가 — 사전제작 CeO2 분말을 재용해한 경우만 예외 허용 |
@@ -852,13 +866,35 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 | **`dashboard.bat` + 데스크탑 바로가기 추가** | 메뉴 선택 없이 더블클릭으로 바로 대시보드 실행 (`launcher.bat`과 별도, 대시보드 전용) |
 | GitHub push | 미실행 (CMD 필요, 사용자 안내) |
 
+### 35차 세션 (2026-07-16) — 파이프라인 전체 리뷰 + 테스트 인프라 도입
+
+`audit_extraction_accuracy.py`의 어순 버그를 고치다가, "사용자가 이런 상황이 재발하지
+않게 전체 파이프라인을 검토해달라"고 요청 — 조사 에이전트 2개를 병렬로 띄워 화학명↔화학식
+동의어 매칭·필드 검증·필터링 로직이 있는 모든 파일을 훑었다.
+
+| 작업 | 결과 |
+|------|------|
+| **전체 조사** (에이전트 2개 병렬) | `src/ceria_dictionary.py`, `src/dopant_dictionary.py`, `src/experiment_parser.py`, `src/quantity_extractor.py`, `src/extract_ceria_rules.py`, `8_normalize_data.py`, `6_fill_keywords.py`, `filter_offtopic_papers.py`를 검토 — 26개 항목 발견(같은 "화학명↔화학식 표기 불일치"·"너무 넓은 범위에서 키워드 존재만으로 판정" 버그 패턴이 6~7개 파일에 반복). 우선순위: 🔴치명적 4건, 🟠심각 2건, 🟡보통 5건, 🟢낮음 다수 |
+| **진행 방향 논의** | "파이썬 전문가 관점에서 최고 성능 시스템" 질문에 대해 4단계 계획 제안 후 사용자 승인: 0)pytest 도입+회귀테스트 1)치명적 4건 수정 2)데이터손실 위험 검증 3)건조/소성 버그 수정+재실행+재학습 |
+| **0단계: pytest 도입** | 프로젝트 최초의 자동화 테스트. `src/normalize_rules.py` 신규 — 8_normalize_data.py/6_fill_keywords.py에 인라인으로 박혀 있던 순수 매칭 로직(부작용 없음)을 분리해야 테스트 가능(두 스크립트는 import 시 즉시 Excel을 읽고 쓰는 구조라 직접 테스트 불가). `tests/` 신규, 43건 작성 |
+| **1단계: 치명적 버그 4건 수정** | `is_ce_compound()`(cesium/CTAB/cellulose 오탐), `derive_anion()`(무관 두 성분 걸친 매칭), `dopant_symbol_pattern()`(Co/In vs co-doped/전치사 in), `CE_PRECURSOR_FULLTEXT_KW`(" can " 조동사 충돌) — 전부 `src/normalize_rules.py`로 이동 후 스크립트에서 import. 43개 테스트 전부 통과 |
+| **2단계: filter_offtopic_papers.py 데이터손실 검증** | ceric/cerous 표기 누락으로 정상 논문이 오제거됐는지 23차 필터링 전 백업 파일(`_backup_filter_20260615_135711`)로 실측 — **실제 손실 0건** (후보 8건 전부 "glyceric acid" 등 무관 단어 부분문자열 오탐 또는 세리아와 무관한 논문). 단어경계(`\b`) 붙여 방어적으로 추가 + `Ce(OH)`/"cerium carbonate" 복붙 실수 수정 |
+| **3단계: 건조/소성 값 교체 버그 수정** | `extract_ceria_rules.py`/`experiment_parser.py`에 `split_into_clauses()` 추가해 "and then" 등으로 절 분리 후 판정. **35차 발견: 이 두 파일은 현재 어떤 파이프라인 스크립트에서도 호출되지 않는 죽은 코드**(GPT 추출이 대체) — 버그 수정·테스트는 의미 있지만 재학습은 불필요 |
+| **Stage 3+4 재실행** (`main.py --reset --from 3`) | 1단계 수정(실 데이터 영향 있음)만 반영해 재실행. `ce_precursor 검증` 6행 신규 NULL 처리, `anion_type` 파생 로직 안전해짐. HistGBM/LightGBM primary_nm·xrd_nm 지표는 **32~34차 값과 거의 동일**(영향받는 행 수가 적어 지표에는 아직 안 드러남 — 버그는 실재했고 고쳐졌지만 크기가 작음) |
+| GitHub push | 미실행 (CMD 필요) |
+
 ---
 
 ## 미완료 항목 (우선순위 순)
 
 1. **[검토]** ce_precursor 실제 오류 후보 3~4건 개별 확인 — 34차에서 발견된 `10.1007/s10971-014-3582-3`(부정확한 화학식 표기), `10.1007/s10854-018-9809-2`(다중조건 값 혼선 추정), `10.1021/cm703005g`(sol-gel 서술과 불일치). `4_extract_targeted_cache.json`에서 해당 DOI 재추출 필요 여부 판단.
-2. **[저우선]** audit tier1 잔여 13.0% ce_precursor flag(1,067건) — 매칭 로직 4단계 개선 후에도 남은 잔여, 상당수 여전히 과탐(짧은/손상 텍스트, 무관 논문 등) 추정. 추가 개선보다는 위 1번처럼 개별 의심 사례 위주 검토가 효율적일 것으로 판단.
-3. **[저우선]** GitHub push — CMD에서 직접 실행 필요:
+2. **[백로그]** 35차 파이프라인 리뷰에서 발견됐지만 아직 안 고친 🟡보통 항목들 (전부 `src/dopant_dictionary.py`, `src/ceria_dictionary.py` 등 — 35차 3단계에서 확인했듯 **이 모듈들은 현재 파이프라인 미사용 죽은 코드라 긴급하지 않음**, 향후 GPT 추출과 나란히 검증용으로 되살릴 계획이 생기면 먼저 처리):
+   - `src/dopant_dictionary.py`: 음이온(nitrate/chloride/acetate/oxide) 통합 정규식인데 canonical_name은 무조건 "OO nitrate"로 고정 — 실제 oxide/chloride를 써도 nitrate로 잘못 보고. 산화물 화학식(Gd2O3 등) 자체 인식 패턴 없음.
+   - `src/ceria_dictionary.py`: "ceric nitrate"(Ce4+, Ce(NO3)4)가 "cerium nitrate hexahydrate"(Ce3+)와 같은 canonical로 묶여 오분류. "TEA"가 이 파일(트리에틸아민)과 `extract_ceria_rules.py`(트리에탄올아민)에서 다르게 정의됨.
+   - `8_normalize_data.py`의 `TITLE_MORPH_KW`가 `6_fill_keywords.py`의 형태 키워드보다 카테고리 적음(tube/sheet/disk 등 누락) — 이건 죽은 코드가 아니라 실제 사용되므로 백로그 중 우선순위가 상대적으로 높음.
+3. **[검토]** `4_extract_targeted.py`의 ce_precursor 프롬프트에 `2_extract.py`에 이미 있는 이름↔화학식 동의어 매핑(예: "CAN" 약어)이 빠져 있음 — 35차에서 발견, 아직 프롬프트 수정 안 함. 두 추출 스크립트의 프롬프트 정합성 점검 필요.
+4. **[저우선]** audit tier1 잔여 13.0% ce_precursor flag(1,067건) — 매칭 로직 4단계 개선 후에도 남은 잔여, 상당수 여전히 과탐(짧은/손상 텍스트, 무관 논문 등) 추정. 추가 개선보다는 위 1번처럼 개별 의심 사례 위주 검토가 효율적일 것으로 판단.
+5. **[저우선]** GitHub push — CMD에서 직접 실행 필요:
    ```cmd
    cd "d:\머신러닝 교육\ceria_pipeline_data"
    git push origin main
