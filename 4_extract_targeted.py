@@ -384,6 +384,33 @@ def process_one(doi: str, cache: dict, cache_lock: threading.Lock, client) -> tu
     return doi, {}
 
 
+def apply_targeted_results(df, all_results: dict, target_fields: list) -> dict:
+    """재추출 결과(all_results)를 DataFrame에 반영.
+
+    35차 버그: 예전엔 `df[field].apply(_is_empty)`로 필드가 "비어있을 때만"
+    반영했음 — 이 DOI가 target_dois로 선정된 이유(15필드 중 하나라도 비어있음)와
+    무관하게, 재추출 자체는 15필드 전부를 다시 뽑는데 그 결과가 이미 값이 있던
+    필드엔 절대 반영되지 않는 구조였다. 그래서 `--reset`으로 재추출해도 캐시만
+    새로워지고 실제 데이터셋(CSV)의 기존(오래되고 부정확할 수 있는) 값은 그대로
+    남는 버그였음 (ce_precursor=="CeO2" 의심값을 재추출 전에 미리 NULL로 초기화
+    하던 로직이 있던 이유가 바로 이 한계를 우회하기 위해서였음 — 근본 원인은 안
+    고치고 그 사례만 패치). 재추출 결과는 이 DOI에 대한 최신·최선의 값이므로
+    기존 값과 달라도 덮어쓴다. 반환값: 필드별 변경된 행 수.
+    """
+    updated_rows = {f: 0 for f in target_fields}
+    for doi, result in all_results.items():
+        doi_mask = df["doi"] == doi
+        for field in target_fields:
+            val = result.get(field)
+            if val is not None and not _is_empty(str(val)):
+                new_val = str(val).strip()
+                changed_mask = doi_mask & (df[field].astype(str).str.strip() != new_val)
+                if changed_mask.any():
+                    df.loc[changed_mask, field] = new_val
+                    updated_rows[field] += int(changed_mask.sum())
+    return updated_rows
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run",  action="store_true")
@@ -517,16 +544,7 @@ def main():
     save_cache(cache, cache_lock)
 
     # ── DataFrame에 결과 반영 ─────────────────────────────────────────────────
-    updated_rows = {f: 0 for f in TARGET_FIELDS}
-    for doi, result in all_results.items():
-        doi_mask = df["doi"] == doi
-        for field in TARGET_FIELDS:
-            val = result.get(field)
-            if val is not None and not _is_empty(str(val)):
-                row_mask = doi_mask & df[field].apply(_is_empty)
-                if row_mask.any():
-                    df.loc[row_mask, field] = str(val).strip()
-                    updated_rows[field] += int(row_mask.sum())
+    updated_rows = apply_targeted_results(df, all_results, TARGET_FIELDS)
 
     # ── CSV 저장 ──────────────────────────────────────────────────────────────
     tmp = str(CSV).replace(".csv", "_tmp.csv")

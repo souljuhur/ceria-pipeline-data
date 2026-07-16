@@ -162,12 +162,28 @@ def extract_size_with_method(sentence: str):
         }
 
 
+_DOPANT_ANION_RE = re.compile(r"\b(nitrate|chloride|acetate|oxide)\b", re.I)
+
+
 def extract_dopants(text: str):
+    """35차: DOPANT_ENTRIES의 패턴 상당수가 "nitrate|chloride|acetate|oxide"를
+    하나의 정규식으로 묶어놓고 canonical_name은 무조건 "OO nitrate"로 고정돼
+    있어, 논문이 oxide/chloride를 썼어도 nitrate로 잘못 보고됐다. 실제 매칭된
+    문자열에서 음이온 단어를 다시 찾아 canonical_name을 동적으로 구성 — 매칭이
+    화학식 패턴(예: Gd(NO3)3)이라 음이온 단어가 없으면 정적 canonical_name으로
+    폴백(그 경우엔 패턴 자체가 특정 음이온 전용이라 항상 맞음)."""
     found = []
     for entry in DOPANT_ENTRIES:
         for p in entry["patterns"]:
-            if re.search(p, text, flags=re.I):
-                found.append((entry["element"], entry["canonical_name"]))
+            m = re.search(p, text, flags=re.I)
+            if m:
+                anion_m = _DOPANT_ANION_RE.search(m.group(0))
+                if anion_m:
+                    element_name = entry["canonical_name"].split()[0]
+                    precursor = f"{element_name} {anion_m.group(1).lower()}"
+                else:
+                    precursor = entry["canonical_name"]
+                found.append((entry["element"], precursor))
                 break
 
     elements = sorted(set(x[0] for x in found))

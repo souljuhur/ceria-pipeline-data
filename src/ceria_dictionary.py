@@ -13,7 +13,18 @@ CHEMICAL_ENTRIES = [
             r"Ce\s*\(NO[_\s]?3\)[_\s]?3\s*[·\.]?\s*6\s*H[_\s]?2\s*O",
             r"Ce\s*\(NO[_\s]?3\)[_\s]?3(?!\s*\))",
             r"cerous\s+nitrate",
-            r"ceric\s+nitrate",          # Ce4+ 질산염도 커버
+        ],
+    },
+    {
+        # 35차: "ceric nitrate"는 Ce(NO3)4(Ce4+)로 위 Ce(NO3)3·6H2O(Ce3+)와는
+        # 다른 화합물 — 같은 canonical로 묶여있던 오분류를 별도 항목으로 분리.
+        "name": "ceric nitrate",
+        "canonical_name": "Ce(NO3)4",
+        "category": "ce_precursor",
+        "patterns": [
+            r"ceric\s+nitrate",
+            r"cerium\s*\(?\s*IV\s*\)?\s*nitrate",
+            r"Ce\s*\(NO[_\s]?3\)[_\s]?4",
         ],
     },
     {
