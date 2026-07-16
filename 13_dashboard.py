@@ -35,7 +35,43 @@ WEEKLY_STATE  = os.path.join(OUTPUT_DIR, "weekly_state.json")
 
 # ── 사이드바 ──────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.title("⚗️ CeO₂ 파이프라인")
+    st.markdown(
+        """
+        <style>
+        .ceo2-brand {
+            background: linear-gradient(135deg, #0f766e 0%, #155e75 55%, #1e3a8a 100%);
+            border-radius: 14px;
+            padding: 18px 20px 16px 20px;
+            margin-bottom: 6px;
+            box-shadow: 0 6px 18px rgba(15, 60, 90, 0.28);
+        }
+        .ceo2-brand .icon {
+            font-size: 26px;
+            line-height: 1;
+            margin-bottom: 6px;
+        }
+        .ceo2-brand .title {
+            color: #ffffff;
+            font-size: 21px;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            margin: 0 0 3px 0;
+        }
+        .ceo2-brand .subtitle {
+            color: rgba(255,255,255,0.75);
+            font-size: 12.5px;
+            font-weight: 400;
+            letter-spacing: 0.2px;
+        }
+        </style>
+        <div class="ceo2-brand">
+            <div class="icon">⚗️</div>
+            <div class="title">CeO<sub>2</sub> Pipeline</div>
+            <div class="subtitle">세리아 나노입자 합성 데이터 · ML 파이프라인</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.divider()
     page = st.radio(
         "페이지 선택",

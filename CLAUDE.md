@@ -219,11 +219,23 @@ ceria_pipeline_data/
 | 모델 | 31차 | 32차/34차 | n | 비고 |
 |------|------|------|---|------|
 | HistGBM | +0.002 | **+0.0017** | 3,586 | 거의 동일, n +165 (PDF 재추출 효과, 32차) |
-| LightGBM | +0.077 | **+0.052** | 3,586 | **34차 재실행 — 하락** (원인 미조사, n +165) |
+| LightGBM | +0.077 | **+0.052** | 3,586 | **34차 재실행 — 하락, 원인 규명 완료(아래 참고, fold 구성 민감도)** |
 | CatBoost | +0.062 | **+0.099** | 3,595 | **34차 `--tune` 재탐색 완료 — 개선** (32차 +0.085 대비 +0.014) |
 
 > **XRD 노이즈 필터 효과** (21차 기준): `12_model.py`에 `between(2, 150)` 필터 → 26차 72건 제거
 > 물리적 근거: Scherrer equation 유효 범위 2~150nm (< 2nm 불가, > 150nm Scherrer 한계 초과)
+
+> **LightGBM xrd_nm 34차 하락 원인 규명** — `12b_lgbm_baseline.py`의 `GroupKFold(n_splits=5)`는
+> `shuffle=False`(기본값)로 논문(DOI) 그룹을 크기순 그리디 배분하는 **완전 결정론적** 알고리즘이라
+> DKL-GP처럼 "시드 미고정" 문제는 아님. 대신 **논문 1,144편 규모에서 log-R²≈0인 약한 신호를 5-fold로
+> 나누다 보니, 어떤 논문이 우연히 검증 폴드에 포함되는지에 따라 결과가 크게 흔들리는 구조적 불안정성**이
+> 원인으로 확인됨: 동일한 34차 데이터에 `shuffle=True`로 20가지 다른 fold 구성을 시도한 결과
+> log-R²가 **-0.016~+0.069(스프레드 0.084, 평균 0.032, std 0.020)**로 널뛰었고, 34차 기본값(+0.052)은
+> 이 정상 변동 범위 안에 있었음. 31차(+0.077) 대비 하락폭(0.025)은 이 스프레드(0.084)보다 훨씬 작아
+> **데이터 품질 저하가 아니라 fold 구성 노이즈**로 결론. 진단 스크립트는 세션 스크래치패드에만 저장(파이프라인
+> 미포함). 개선하려면 `evaluate_lgbm()`의 GroupKFold를 여러 시드로 반복해 평균±표준편차로 보고하는 방식
+> 권장(현재는 1회 CV 결과만 보고 — DKL-GP 사례와 마찬가지로 이런 소규모·약신호 타겟은 단일 실행값의
+> 세션 간 비교가 오해를 부를 수 있음).
 
 > ※ DKL-GP 34차: `torch.manual_seed(42)` 시드 고정 후 재학습. ep20 best(val-MAE=0.8409), ep70 조기종료
 >    → top-3 버퍼 중 ep50 선택(val-MAE=0.8563) → log-R²=**+0.072**, 실측 MAE=24.70nm, PICP(90%)=0.821.
@@ -312,14 +324,15 @@ streamlit run 13_dashboard.py       # 대시보드 (http://localhost:8501)
 
 34차 완료 (LightGBM 재실행·audit 매칭 개선·DKL-GP 시드 고정+재학습·CatBoost `--tune` 재탐색 전부 완료).
 - 성능 현황: HistGBM **-0.050**(32차) / LightGBM **+0.018**(34차 재실행) / CatBoost **+0.123**(34차 `--tune` 완료) / DKL-GP **+0.072**(34차 재학습)
-- 34차 완료: LightGBM(12b)·LightGBM 역설계(12d_targeted_design) 32차 데이터로 재실행 (xrd_nm +0.052로 하락, 원인 미조사 — 다음 세션 1번 항목)
+- 34차 완료: LightGBM(12b)·LightGBM 역설계(12d_targeted_design) 32차 데이터로 재실행 (xrd_nm +0.052로 하락 — 원인 규명 완료: GroupKFold 20시드 재검증 결과 스프레드 0.084로 데이터 품질 문제 아닌 fold 구성 노이즈로 결론)
 - 34차 완료: `audit_extraction_accuracy.py` 매칭 로직 개선 — ce_precursor flag 41.6%→**23.4%** (화학명↔화학식 동치 검사 추가)
 - 34차 완료: `12c_gpr_model.py`에 `torch.manual_seed(42)` 등 시드 고정 추가 + DKL-GP 재학습 → log-R²=**+0.072**(32차 +0.020 대비 회복, 31차 +0.072와 거의 동일). **결론: 27→32차 3연속 하락은 데이터 품질 저하가 아니라 학습 시드 미고정으로 인한 노이즈였을 가능성이 매우 높음**
 - 34차 완료: CatBoost `--tune` 32차 데이터 재탐색 완료 (60회, 실소요 9시간56분 — 예상(2.5~3시간)보다 훨씬 오래 걸림, 트라이얼당 5~14분). primary_nm **+0.107→+0.123**, xrd_nm **+0.085→+0.099** 개선. `catboost_best_params.json` 갱신됨(depth 9→6)
 - GitHub: 34차 커밋 완료(`eeccdb2`, `a465354`, gitpython 우회) — push는 여전히 CMD에서 `git push origin main` 실행 필요 (origin 대비 여러 commit ahead)
 - CatBoost segfault: 모델 저장 후 cleanup 단계에서 발생 — pkl 파일은 정상, 기능상 문제 없음 (지속 관찰 중)
-- DKL-GP log-R²는 34차 재학습으로 회복됐지만(+0.072), LightGBM xrd_nm은 여전히 하락 상태(+0.052) — 동일한 시드/노이즈 이슈가 있는지 다음 세션에서 확인 필요
+- **34차 핵심 결론**: DKL-GP(+0.020→+0.072, 시드 미고정)와 LightGBM xrd_nm(+0.052, fold 구성 민감도) 둘 다 "27~34차 성능 하락"이 실제 데이터 품질 저하가 아니라 **평가 방법의 노이즈**였음을 시사. 향후 세션 간 성능 비교 시 log-R² 델타가 ~0.05 미만이면 노이즈 가능성을 먼저 의심할 것 (특히 crystallite_size_xrd_nm, 소규모·약신호 타겟)
 - `audit_extraction_accuracy.py` tier1 ce_precursor flag는 34차 매칭 개선으로 41.6%→23.4%까지 감소 — 잔여 23.4%도 상당수 추가 화학명 변형(예: 다른 어순의 ceric ammonium nitrate, 드문 수화물 표기) 과탐일 가능성, 완전 해소는 아님
+- 대시보드 사이드바 브랜딩을 그라디언트 카드 스타일로 개선(`13_dashboard.py`), `dashboard.bat`+데스크탑 바로가기 추가 — 사용자 편의 기능, 파이프라인 로직과 무관
 
 필요시 재학습:
 
@@ -827,21 +840,23 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 
 | 작업 | 결과 |
 |------|------|
-| **LightGBM(12b_lgbm_baseline.py) 32차 데이터 재실행** | primary_nm log-R²=**+0.018**(31차 +0.016과 거의 동일), xrd_nm log-R²=**+0.052**(31차 +0.077 대비 하락, 원인 미조사) |
+| **LightGBM(12b_lgbm_baseline.py) 32차 데이터 재실행** | primary_nm log-R²=**+0.018**(31차 +0.016과 거의 동일), xrd_nm log-R²=**+0.052**(31차 +0.077 대비 하락 — 원인은 아래에서 규명) |
 | **LightGBM 역설계(12d_targeted_design.py) 재실행** | GroupKFold log-R²=+0.062, 10/30/60nm 역설계 조건 갱신 (targeted_design_*.csv) |
 | **`audit_extraction_accuracy.py` tier1 ce_precursor 표본 검토** | 28건 무작위 표본 중 11건 원문 심층 대조 — 10건이 "cerium nitrate hexahydrate" 등 산문 화학명을 GPT가 정확한 화학식으로 변환한 것이 원인인 **과탐**, 1건만 실제 의심(합성 서술 없이 기성 nanoceria 사용 논문) |
 | **`_ce_precursor_alt_match()` 매칭 로직 추가** | 음이온(nitrate/chloride/sulfate/acetate/carbonate/oxalate/hydroxide/acetylacetonate)·수화물(mono~deca)·ammonium ceric nitrate 명칭↔화학식 동치 검사 → ce_precursor flag **41.6%→23.4%** (3,413→1,924건) |
 | **`12c_gpr_model.py` 랜덤 시드 고정 + DKL-GP 재학습** | `torch.manual_seed(42)` 등 추가 후 재학습 → log-R²=**+0.072**(32차 +0.020 대비 +0.052 회복, 31차 +0.072와 거의 동일). 27→32차 3연속 하락이 데이터 품질 문제가 아니라 **학습 시드 미고정으로 인한 노이즈**였음을 강력히 뒷받침 |
 | **CatBoost `--tune` 32차 데이터 재탐색** (완료) | 60회 Optuna 탐색, 실소요 **9시간56분**(트라이얼당 5~14분, 예상보다 오래 걸림). primary_nm **+0.107→+0.123**, xrd_nm **+0.085→+0.099** 둘 다 개선. 신규 params: iterations=740, lr=0.0216, depth=6 (29차 depth=9보다 얕음) |
+| **LightGBM xrd_nm 34차 하락 원인 규명** | 동일 34차 데이터에 `GroupKFold(shuffle=True)` 20가지 시드로 재검증 → log-R² **-0.016~+0.069(스프레드 0.084)**로 요동. 31차↔34차 차이(0.025)가 이 스프레드보다 작아 **데이터 품질 저하가 아니라 fold 구성 노이즈**로 결론 (DKL-GP와 결론은 같으나 메커니즘은 다름 — 학습 시드가 아니라 소규모·약신호 타겟의 GroupKFold 그룹 배분 민감도) |
+| **대시보드 사이드바 브랜딩 개선** (`13_dashboard.py`) | 사용자 요청으로 `st.title` 대신 그라디언트 카드 스타일(아이콘 배지 + CeO₂ 화학식 첨자 + 서브타이틀) 적용 |
+| **`dashboard.bat` + 데스크탑 바로가기 추가** | 메뉴 선택 없이 더블클릭으로 바로 대시보드 실행 (`launcher.bat`과 별도, 대시보드 전용) |
 | GitHub push | 미실행 (CMD 필요, 사용자 안내) |
 
 ---
 
 ## 미완료 항목 (우선순위 순)
 
-1. **[조사]** LightGBM xrd_nm 34차 하락 원인 미조사 — 31차 +0.077 → 34차 +0.052. ce_precursor/PDF 텍스트 수정 후 n이 3,421→3,586로 늘었는데 왜 하락했는지 확인 필요 (fold별 분산 확인 권장). DKL-GP 사례처럼 LightGBM도 시드/폴드 분할에 따른 노이즈일 가능성 있음 — `12b_lgbm_baseline.py`의 GroupKFold도 재현성 확인 권장.
-2. **[검토]** audit tier1 잔여 23.4% ce_precursor flag — 34차 매칭 개선 이후에도 남은 flag가 추가 화학명 변형(어순이 다른 ammonium cerium nitrate, 드문 수화물 표기 등) 때문인 과탐인지, 진짜 오류인지 추가 표본 검토 필요.
-3. **[저우선]** GitHub push — CMD에서 직접 실행 필요:
+1. **[검토]** audit tier1 잔여 23.4% ce_precursor flag — 34차 매칭 개선 이후에도 남은 flag가 추가 화학명 변형(어순이 다른 ammonium cerium nitrate, 드문 수화물 표기 등) 때문인 과탐인지, 진짜 오류인지 추가 표본 검토 필요.
+2. **[저우선]** GitHub push — CMD에서 직접 실행 필요:
    ```cmd
    cd "d:\머신러닝 교육\ceria_pipeline_data"
    git push origin main
