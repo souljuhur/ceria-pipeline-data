@@ -78,7 +78,6 @@ def _normalize(s: str) -> str:
 # 41.6% flag의 대부분이 이 패턴으로 추정됨 (표본 검토: 28건 중 11건 심층 확인, 10건이
 # 이 유형의 과탐, 1건만 실제 의심 사례).
 _ANION_ALIASES = [
-    (re.compile(r"\(nh4\)2ce\(no3\)6|nh42ceno36", re.IGNORECASE), ["ammoniumcericnitrate", "cericammoniumnitrate"]),
     (re.compile(r"no3", re.IGNORECASE), ["nitrate"]),
     (re.compile(r"(?<!f)cl(?!o)", re.IGNORECASE), ["chloride"]),
     (re.compile(r"so4", re.IGNORECASE), ["sulfate", "sulphate"]),
@@ -88,32 +87,34 @@ _ANION_ALIASES = [
     (re.compile(r"\(oh\)", re.IGNORECASE), ["hydroxide"]),
     (re.compile(r"acac", re.IGNORECASE), ["acetylacetonate"]),
 ]
-_HYDRATE_ALIASES = {
-    1: "monohydrate", 2: "dihydrate", 3: "trihydrate", 4: "tetrahydrate",
-    5: "pentahydrate", 6: "hexahydrate", 7: "heptahydrate", 8: "octahydrate",
-    9: "nonahydrate", 10: "decahydrate",
-}
-_HYDRATE_RE = re.compile(r"[·∙.\-]\s*(\d+)\s*H(?:2|₂)?O", re.IGNORECASE)
+_AMMONIUM_CERIC_RE = re.compile(r"\(nh4\)2ce\(no3\)6|nh42ceno36", re.IGNORECASE)
 
 
 def _ce_precursor_alt_match(raw_value: str, text_norm: str) -> bool:
-    """화학명 산문 표현(예: cerium nitrate hexahydrate)이 원문에 있는지 확인."""
-    found_anion = False
+    """화학명 산문 표현(예: cerium nitrate hexahydrate)이 원문에 있는지 확인.
+
+    34차 2차 표본 검토에서 확인된 두 가지 보정:
+    1. 논문들이 "cerium nitrate"까지는 쓰지만 "hexahydrate"는 생략하는 경우가 매우
+       흔함(상업용 Ce(NO3)3의 표준 형태가 육수화물이라 다들 당연히 생략) — 수화물 명
+       불일치를 실패 조건으로 쓰면 이런 정상 케이스까지 과탐 처리됨. 수화물은 검사하지
+       않음(있으면 좋지만 없어도 통과).
+    2. ammonium ceric nitrate ((NH4)2Ce(NO3)6)는 논문마다 어순이 제각각
+       ("ammonium ceric nitrate", "cerium ammonium nitrate", "ceric ammonium
+       nitrate" 등) — 특정 어순 문자열을 찾는 대신 "ammonium"과 "nitrate" 두
+       단어가 모두 있는지만 확인.
+    공통: "cerium/cerous/ceric" 언급 자체가 원문에 있는지 요구해 무관한 음이온 매칭
+    (예: 다른 시약의 nitrate)으로 인한 오탐 확인을 방지.
+    """
+    if not any(k in text_norm for k in ("cerium", "cerous", "ceric")):
+        return False  # 세륨 관련 언급 자체가 없음(다른 시약일 가능성) — 대체 검사 불가
+
+    if _AMMONIUM_CERIC_RE.search(raw_value):
+        return "ammonium" in text_norm and "nitrate" in text_norm
+
     for pat, names in _ANION_ALIASES:
         if pat.search(raw_value):
-            if not any(_normalize(n) in text_norm for n in names):
-                return False  # 화학식상 음이온은 있는데 원문에 해당 이름이 전혀 없음
-            found_anion = True
-            break
-    if not found_anion:
-        return False  # 인식 가능한 음이온 패턴 없음 — 대체 검사 불가
-
-    m = _HYDRATE_RE.search(raw_value)
-    if m:
-        name = _HYDRATE_ALIASES.get(int(m.group(1)))
-        if name and _normalize(name) not in text_norm:
-            return False  # 수화물 개수가 formula엔 있는데 원문 화학명과 불일치
-    return True
+            return any(_normalize(n) in text_norm for n in names)
+    return False  # 인식 가능한 음이온 패턴 없음 — 대체 검사 불가
 
 
 def _value_found_in_text(value: str, text_norm: str, field: str = "") -> bool:

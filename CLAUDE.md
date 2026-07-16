@@ -163,7 +163,7 @@ ceria_pipeline_data/
 | unidentified_method 행 수 | **286행** (28차 Section 1c 77행 복구 — 26차 363행) |
 | ce_precursor Non-Ce 정제 | **214행 NULL 처리** (28차 Section 1d — 도펀트·식물추출물 등 오분류 제거) |
 | ce_precursor="CeO2" 오분류 | **12.3% → 3.5%** (32차 — 프롬프트 화이트리스트 버그 수정 + 의심값 재추출) |
-| 추출 정확도 감사 tier1 ce_precursor flag | **41.6% → 23.4%** (34차 — 명칭↔화학식 동치 매칭 추가, 3,413→1,924건. 표본 검토로 대부분 과탐 확인) |
+| 추출 정확도 감사 tier1 ce_precursor flag | **41.6% → 13.0%** (34차 — 명칭↔화학식 동치 매칭 2차 개선, 3,413→1,066건. 잔여도 상당수 과탐 추정, 실제 의심 사례 소수 확인) |
 | 추출 정확도 감사 (33차, tier2 GPT 20편) | 14건 flag → 원문대조 결과 **13건 오탐**(감사관 자기모순/과탐), 실제 이슈 후보 1건(다중조건 논문 값 혼선) |
 | 추출 필드 수 | **15개** (29차: synthesis_time_h·morphology 추가) |
 | Excel 열 수 | **48열** (11_format_excel.py 기준) |
@@ -325,13 +325,13 @@ streamlit run 13_dashboard.py       # 대시보드 (http://localhost:8501)
 34차 완료 (LightGBM 재실행·audit 매칭 개선·DKL-GP 시드 고정+재학습·CatBoost `--tune` 재탐색 전부 완료).
 - 성능 현황: HistGBM **-0.050**(32차) / LightGBM **+0.018**(34차 재실행) / CatBoost **+0.123**(34차 `--tune` 완료) / DKL-GP **+0.072**(34차 재학습)
 - 34차 완료: LightGBM(12b)·LightGBM 역설계(12d_targeted_design) 32차 데이터로 재실행 (xrd_nm +0.052로 하락 — 원인 규명 완료: GroupKFold 20시드 재검증 결과 스프레드 0.084로 데이터 품질 문제 아닌 fold 구성 노이즈로 결론)
-- 34차 완료: `audit_extraction_accuracy.py` 매칭 로직 개선 — ce_precursor flag 41.6%→**23.4%** (화학명↔화학식 동치 검사 추가)
+- 34차 완료: `audit_extraction_accuracy.py` 매칭 로직 3차 개선 — ce_precursor flag 41.6%→**13.0%** (화학명↔화학식 동치·수화물 완화·ammonium ceric nitrate 어순대응). 재검토 중 실제 오류 후보 3~4건 발견(미완료 항목 1번)
 - 34차 완료: `12c_gpr_model.py`에 `torch.manual_seed(42)` 등 시드 고정 추가 + DKL-GP 재학습 → log-R²=**+0.072**(32차 +0.020 대비 회복, 31차 +0.072와 거의 동일). **결론: 27→32차 3연속 하락은 데이터 품질 저하가 아니라 학습 시드 미고정으로 인한 노이즈였을 가능성이 매우 높음**
 - 34차 완료: CatBoost `--tune` 32차 데이터 재탐색 완료 (60회, 실소요 9시간56분 — 예상(2.5~3시간)보다 훨씬 오래 걸림, 트라이얼당 5~14분). primary_nm **+0.107→+0.123**, xrd_nm **+0.085→+0.099** 개선. `catboost_best_params.json` 갱신됨(depth 9→6)
 - GitHub: 34차 커밋 완료(`eeccdb2`, `a465354`, gitpython 우회) — push는 여전히 CMD에서 `git push origin main` 실행 필요 (origin 대비 여러 commit ahead)
 - CatBoost segfault: 모델 저장 후 cleanup 단계에서 발생 — pkl 파일은 정상, 기능상 문제 없음 (지속 관찰 중)
 - **34차 핵심 결론**: DKL-GP(+0.020→+0.072, 시드 미고정)와 LightGBM xrd_nm(+0.052, fold 구성 민감도) 둘 다 "27~34차 성능 하락"이 실제 데이터 품질 저하가 아니라 **평가 방법의 노이즈**였음을 시사. 향후 세션 간 성능 비교 시 log-R² 델타가 ~0.05 미만이면 노이즈 가능성을 먼저 의심할 것 (특히 crystallite_size_xrd_nm, 소규모·약신호 타겟)
-- `audit_extraction_accuracy.py` tier1 ce_precursor flag는 34차 매칭 개선으로 41.6%→23.4%까지 감소 — 잔여 23.4%도 상당수 추가 화학명 변형(예: 다른 어순의 ceric ammonium nitrate, 드문 수화물 표기) 과탐일 가능성, 완전 해소는 아님
+- `audit_extraction_accuracy.py` tier1 ce_precursor flag는 34차 매칭 로직 3차 개선으로 41.6%→**13.0%**까지 감소(3,413→1,066건). 잔여 표본 재검토에서 실제 오류 후보 3~4건 확인 — 다음 세션 1번 항목으로 개별 확인 필요
 - 대시보드 사이드바 브랜딩을 그라디언트 카드 스타일로 개선(`13_dashboard.py`), `dashboard.bat`+데스크탑 바로가기 추가 — 사용자 편의 기능, 파이프라인 로직과 무관
 
 필요시 재학습:
@@ -680,7 +680,7 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 | 세션 | 파일 | 버그 | 수정 |
 |------|------|------|------|
 | 34차 | **12c_gpr_model.py** | `torch.manual_seed` 등 랜덤 시드 미고정 — NN 초기화·유도점 초기화·DataLoader 셔플이 매 실행마다 달라져 동일 데이터로도 log-R²가 크게 변동, 세션 간 성능 비교가 데이터 변화 때문인지 학습 노이즈 때문인지 구분 불가 | `torch.manual_seed(42)` + `np.random.seed(42)` + `torch.cuda.manual_seed_all(42)` 추가 |
-| 34차 | **audit_extraction_accuracy.py** | Tier1 `_value_found_in_text()`가 화학식 리터럴 문자열만 대조 — 논문이 "cerium nitrate hexahydrate"처럼 산문 화학명으로 서술하면 GPT가 정확히 표준 화학식으로 변환해도 과탐(false positive) 발생 (ce_precursor flag 41.6%) | `_ce_precursor_alt_match()` 추가 — 음이온(nitrate/chloride/sulfate 등)·수화물(hexahydrate 등) 명칭 동치 검사, flag 41.6%→23.4%로 감소 |
+| 34차 | **audit_extraction_accuracy.py** | Tier1 `_value_found_in_text()`가 화학식 리터럴 문자열만 대조 — 논문이 "cerium nitrate hexahydrate"처럼 산문 화학명으로 서술하면 GPT가 정확히 표준 화학식으로 변환해도 과탐(false positive) 발생 (ce_precursor flag 41.6%) | `_ce_precursor_alt_match()` 3단계 개선 — ① 음이온(nitrate/chloride/sulfate 등) 명칭 동치 검사(41.6%→23.4%) ② 수화물(hexahydrate 등) 불일치를 실패조건에서 제외 — 대부분 논문이 수화물명 생략(23.4%→14.5%) ③ ammonium ceric nitrate 어순 다양성 대응, "ammonium"+"nitrate" 존재만 확인(14.5%→**13.0%**) |
 | 32차 | **2_extract.py**, **4_extract_targeted.py** | ce_precursor 스키마 설명에 `CeO2`를 유효 전구체 예시로 포함 — 논문 전체에서 계속 언급되는 최종 생성물명(CeO2)이 시작 시약으로 오추출됨 (ML 데이터셋 12.3% 영향) | 스키마 예시에서 `CeO2` 제거, "CeO2를 기본값으로 추측하지 말 것" 경고 추가 — 사전제작 CeO2 분말을 재용해한 경우만 예외 허용 |
 | 32차 | **4_extract_targeted.py** | 기존 ce_precursor="CeO2" 값이 위 버그로 오분류된 채 캐시에 남아 재추출 대상에서 누락됨 | main()에 의심값(`== "CeO2"`) 자동 NULL 초기화 로직 추가 → 재추출 대상 자동 편입 |
 | 32차 | **1_download.py** | pdfplumber가 서브셋 폰트 PDF에서 `(cid:N)` 플레이스홀더를 남겨 텍스트 코퍼스의 36%에서 화학식·수치 파싱 방해 | PyMuPDF(fitz)를 1차 추출기로, pdfplumber는 실패 시 폴백으로 전환 |
@@ -843,7 +843,8 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 | **LightGBM(12b_lgbm_baseline.py) 32차 데이터 재실행** | primary_nm log-R²=**+0.018**(31차 +0.016과 거의 동일), xrd_nm log-R²=**+0.052**(31차 +0.077 대비 하락 — 원인은 아래에서 규명) |
 | **LightGBM 역설계(12d_targeted_design.py) 재실행** | GroupKFold log-R²=+0.062, 10/30/60nm 역설계 조건 갱신 (targeted_design_*.csv) |
 | **`audit_extraction_accuracy.py` tier1 ce_precursor 표본 검토** | 28건 무작위 표본 중 11건 원문 심층 대조 — 10건이 "cerium nitrate hexahydrate" 등 산문 화학명을 GPT가 정확한 화학식으로 변환한 것이 원인인 **과탐**, 1건만 실제 의심(합성 서술 없이 기성 nanoceria 사용 논문) |
-| **`_ce_precursor_alt_match()` 매칭 로직 추가** | 음이온(nitrate/chloride/sulfate/acetate/carbonate/oxalate/hydroxide/acetylacetonate)·수화물(mono~deca)·ammonium ceric nitrate 명칭↔화학식 동치 검사 → ce_precursor flag **41.6%→23.4%** (3,413→1,924건) |
+| **`_ce_precursor_alt_match()` 매칭 로직 3차 개선** | ① 음이온 명칭↔화학식 동치(41.6%→23.4%) ② 수화물 불일치를 실패조건에서 제외 — 논문 대부분이 "hexahydrate" 등 생략(23.4%→14.5%) ③ ammonium ceric nitrate 어순 다양성("cerium ammonium nitrate" 등) 대응, "ammonium"+"nitrate" 존재만 확인(14.5%→**13.0%**, 최종 3,413→1,066건) |
+| **잔여 ce_precursor flag 표본 재검토 (25건)** | 대부분 "cerium nitrate"까지만 확인되고 수화물명 생략된 정상 케이스였으나, **실제 의심 사례 3~4건 확인**: `10.1007/s10971-014-3582-3`(추출값 `Ce(CH3CO)3`가 화학적으로 부정확한 표기 — 논문 제목은 "cerium acetylacetonate"), `10.1007/s10854-018-9809-2`(논문은 `(NH4)2Ce(NO3)6`/`Ce(OH)CO3` 등 언급, 추출값은 `CeCl3·7H2O`로 불일치 — 다중조건 논문 값 혼선 추정), `10.1021/cm703005g`(원문은 "sol-gel precursor"로만 서술, nitrate 언급 없음) — 코드 수정은 안 하고 사례만 기록 |
 | **`12c_gpr_model.py` 랜덤 시드 고정 + DKL-GP 재학습** | `torch.manual_seed(42)` 등 추가 후 재학습 → log-R²=**+0.072**(32차 +0.020 대비 +0.052 회복, 31차 +0.072와 거의 동일). 27→32차 3연속 하락이 데이터 품질 문제가 아니라 **학습 시드 미고정으로 인한 노이즈**였음을 강력히 뒷받침 |
 | **CatBoost `--tune` 32차 데이터 재탐색** (완료) | 60회 Optuna 탐색, 실소요 **9시간56분**(트라이얼당 5~14분, 예상보다 오래 걸림). primary_nm **+0.107→+0.123**, xrd_nm **+0.085→+0.099** 둘 다 개선. 신규 params: iterations=740, lr=0.0216, depth=6 (29차 depth=9보다 얕음) |
 | **LightGBM xrd_nm 34차 하락 원인 규명** | 동일 34차 데이터에 `GroupKFold(shuffle=True)` 20가지 시드로 재검증 → log-R² **-0.016~+0.069(스프레드 0.084)**로 요동. 31차↔34차 차이(0.025)가 이 스프레드보다 작아 **데이터 품질 저하가 아니라 fold 구성 노이즈**로 결론 (DKL-GP와 결론은 같으나 메커니즘은 다름 — 학습 시드가 아니라 소규모·약신호 타겟의 GroupKFold 그룹 배분 민감도) |
@@ -855,8 +856,9 @@ output/model/ (pkl + PNG + CSV + performance_history.json)
 
 ## 미완료 항목 (우선순위 순)
 
-1. **[검토]** audit tier1 잔여 23.4% ce_precursor flag — 34차 매칭 개선 이후에도 남은 flag가 추가 화학명 변형(어순이 다른 ammonium cerium nitrate, 드문 수화물 표기 등) 때문인 과탐인지, 진짜 오류인지 추가 표본 검토 필요.
-2. **[저우선]** GitHub push — CMD에서 직접 실행 필요:
+1. **[검토]** ce_precursor 실제 오류 후보 3~4건 개별 확인 — 34차에서 발견된 `10.1007/s10971-014-3582-3`(부정확한 화학식 표기), `10.1007/s10854-018-9809-2`(다중조건 값 혼선 추정), `10.1021/cm703005g`(sol-gel 서술과 불일치). `4_extract_targeted_cache.json`에서 해당 DOI 재추출 필요 여부 판단.
+2. **[저우선]** audit tier1 잔여 13.0% ce_precursor flag(1,066건) — 매칭 로직 3차 개선 후에도 남은 잔여, 상당수 여전히 과탐(짧은/손상 텍스트, 무관 논문 등) 추정. 추가 개선보다는 위 1번처럼 개별 의심 사례 위주 검토가 효율적일 것으로 판단.
+3. **[저우선]** GitHub push — CMD에서 직접 실행 필요:
    ```cmd
    cd "d:\머신러닝 교육\ceria_pipeline_data"
    git push origin main
