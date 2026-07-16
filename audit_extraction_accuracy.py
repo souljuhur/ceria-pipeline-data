@@ -87,10 +87,37 @@ _ANION_ALIASES = [
     (re.compile(r"\(oh\)", re.IGNORECASE), ["hydroxide"]),
     (re.compile(r"acac", re.IGNORECASE), ["acetylacetonate"]),
 ]
-_AMMONIUM_CERIC_RE = re.compile(r"\(nh4\)2ce\(no3\)6|nh42ceno36", re.IGNORECASE)
+_AMMONIUM_CERIC_FORMULA_RE = re.compile(r"\(nh4\)2ce\(no3\)6|nh42ceno36", re.IGNORECASE)
 
 
-def _ce_precursor_alt_match(raw_value: str, text_norm: str) -> bool:
+def _is_ammonium_ceric_nitrate(raw_value: str) -> bool:
+    """추출값이 ammonium ceric nitrate 계열인지 판별 — 화학식 표기
+    ("(NH4)2Ce(NO3)6") 뿐 아니라 GPT가 화학명으로 추출한 경우("Ce(IV) ammonium
+    nitrate", "ammonium ceric nitrate" 등)도 잡아야 함. 후자는 값 자체에
+    "ammonium"과 "nitrate" 단어가 둘 다 있는지로 판별(값은 짧아서 무관한 두 시약이
+    우연히 같이 들어갈 위험이 거의 없음 — 원문 대조 시의 근접 매칭과는 다른 기준)."""
+    if _AMMONIUM_CERIC_FORMULA_RE.search(raw_value):
+        return True
+    v = raw_value.lower()
+    return "ammonium" in v and "nitrate" in v
+
+
+# ammonium ceric nitrate ((NH4)2Ce(NO3)6)의 동의어 표현. "ammonium"·"nitrate" 두
+# 단어만 아무 데나 있으면 통과시키던 34차 1차 버전은 논문에 등장하는 무관한 두 시약
+# (예: "ammonium hydroxide"와 완전히 별개 문단의 "sodium nitrate")만으로도 오통과할
+# 위험이 있었음 — 대신 두 단어가 실제로 같은 화학명 구절 안에서 서로 인접(60자 이내)해
+# 나타나는지를 확인해, 어순이 달라도("ammonium ceric nitrate" / "cerium ammonium
+# nitrate" / "ceric ammonium nitrate" / "cerium(IV) ammonium nitrate" 등) 같은
+# 화합물을 가리키는 경우만 동의어로 인정하고 무관한 두 시약의 우연한 동시 등장은 배제.
+_AMMONIUM_CERIC_PROXIMITY_RE = re.compile(
+    r"ammonium.{0,60}?nitrate|nitrate.{0,60}?ammonium", re.IGNORECASE | re.DOTALL
+)
+# 일부 논문은 화학명 대신 Hill(원소) 식으로 표기 — 예: "cerium (IV) ammonium nitrate
+# (H8CeN8O18)". 이 경우는 어순 문제가 아니라 완전히 다른 표기 체계이므로 별도 리터럴로 매칭.
+_AMMONIUM_CERIC_FORMULA_ALIAS = "h8cen8o18"
+
+
+def _ce_precursor_alt_match(raw_value: str, text_norm: str, text_loose: str) -> bool:
     """화학명 산문 표현(예: cerium nitrate hexahydrate)이 원문에 있는지 확인.
 
     34차 2차 표본 검토에서 확인된 두 가지 보정:
@@ -98,18 +125,19 @@ def _ce_precursor_alt_match(raw_value: str, text_norm: str) -> bool:
        흔함(상업용 Ce(NO3)3의 표준 형태가 육수화물이라 다들 당연히 생략) — 수화물 명
        불일치를 실패 조건으로 쓰면 이런 정상 케이스까지 과탐 처리됨. 수화물은 검사하지
        않음(있으면 좋지만 없어도 통과).
-    2. ammonium ceric nitrate ((NH4)2Ce(NO3)6)는 논문마다 어순이 제각각
-       ("ammonium ceric nitrate", "cerium ammonium nitrate", "ceric ammonium
-       nitrate" 등) — 특정 어순 문자열을 찾는 대신 "ammonium"과 "nitrate" 두
-       단어가 모두 있는지만 확인.
+    2. ammonium ceric nitrate ((NH4)2Ce(NO3)6)는 논문마다 어순이 제각각이므로
+       "인접 근접 매칭"(같은 구절 안에서 60자 이내 co-occur)으로 동의어 처리 —
+       단순 전체 문서 내 존재 여부가 아니라, 실제로 같은 화합물을 가리키는지까지 확인.
     공통: "cerium/cerous/ceric" 언급 자체가 원문에 있는지 요구해 무관한 음이온 매칭
     (예: 다른 시약의 nitrate)으로 인한 오탐 확인을 방지.
     """
     if not any(k in text_norm for k in ("cerium", "cerous", "ceric")):
         return False  # 세륨 관련 언급 자체가 없음(다른 시약일 가능성) — 대체 검사 불가
 
-    if _AMMONIUM_CERIC_RE.search(raw_value):
-        return "ammonium" in text_norm and "nitrate" in text_norm
+    if _is_ammonium_ceric_nitrate(raw_value):
+        if _AMMONIUM_CERIC_FORMULA_ALIAS in text_norm:
+            return True  # Hill식 표기 별도 매칭
+        return bool(_AMMONIUM_CERIC_PROXIMITY_RE.search(text_loose))
 
     for pat, names in _ANION_ALIASES:
         if pat.search(raw_value):
@@ -117,7 +145,7 @@ def _ce_precursor_alt_match(raw_value: str, text_norm: str) -> bool:
     return False  # 인식 가능한 음이온 패턴 없음 — 대체 검사 불가
 
 
-def _value_found_in_text(value: str, text_norm: str, field: str = "") -> bool:
+def _value_found_in_text(value: str, text_norm: str, field: str = "", text_loose: str = "") -> bool:
     """세미콜론으로 구분된 다중값은 개별 토큰 중 하나라도 원문에 있으면 통과."""
     for token in str(value).split(";"):
         token = token.strip()
@@ -130,7 +158,7 @@ def _value_found_in_text(value: str, text_norm: str, field: str = "") -> bool:
             continue
         if v_norm[:5] in text_norm:  # 어간 수준 완화 매칭 (spherical vs sphere 등)
             continue
-        if field == "ce_precursor" and _ce_precursor_alt_match(token, text_norm):
+        if field == "ce_precursor" and _ce_precursor_alt_match(token, text_norm, text_loose):
             continue
         return False
     return True
@@ -153,8 +181,10 @@ def run_tier1(df: pd.DataFrame) -> pd.DataFrame:
                     raw = ""
             else:
                 raw = ""
-            text_cache[doi] = _normalize(raw)
-        text_norm = text_cache[doi]
+            # text_norm: 완전 정규화(공백·구두점 제거) — 리터럴/어간 매칭용
+            # text_loose: 소문자화 + 공백만 축약(단어 경계 유지) — 근접 매칭(proximity)용
+            text_cache[doi] = (_normalize(raw), re.sub(r"\s+", " ", raw.lower()))
+        text_norm, text_loose = text_cache[doi]
         if not text_norm:
             continue  # 전문 없는 논문은 검사 불가 → 스킵
 
@@ -163,7 +193,7 @@ def run_tier1(df: pd.DataFrame) -> pd.DataFrame:
                 val = row.get(field)
                 if _is_empty(val):
                     continue
-                if not _value_found_in_text(val, text_norm, field=field):
+                if not _value_found_in_text(val, text_norm, field=field, text_loose=text_loose):
                     flags.append({
                         "doi": doi, "row_index": idx, "field": field,
                         "extracted_value": val,
